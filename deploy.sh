@@ -13,11 +13,11 @@ EXCL=(--exclude '.git' --exclude 'test' --exclude 'CONTRACTS.md'
       --exclude 'deploy.sh' --exclude '.gitignore' --exclude 'node_modules' --exclude 'verify' --exclude '.DS_Store')
 
 if [ -d "$DEST" ] && [ -w "$DEST" ]; then
-    rsync -a --delete "${EXCL[@]}" "$SRC/" "$DEST/"
+    rsync -a --delete --delete-excluded "${EXCL[@]}" "$SRC/" "$DEST/"
     echo "✓ Оновлено без пароля: $DEST"
 else
     echo "Перше встановлення — потрібен пароль (Plug-ins належить root)."
-    sudo rsync -a --delete "${EXCL[@]}" "$SRC/" "$DEST/"
+    sudo rsync -a --delete --delete-excluded "${EXCL[@]}" "$SRC/" "$DEST/"
     sudo chown -R "$(id -un):staff" "$DEST"
     echo "✓ Встановлено: $DEST"
     echo "  Наступні оновлення пароля вже не потребують."
