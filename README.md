@@ -25,7 +25,7 @@ Photoshop layer mask.
 
 ## Install
 
-Download `ExactFill-1.2.0.zip` from [Releases](https://github.com/zgmrclick/exactfill-photoshop/releases),
+Download `ExactFill-1.2.1.zip` from [Releases](https://github.com/zgmrclick/exactfill-photoshop/releases),
 extract it completely, and close Photoshop before copying the folder.
 
 ### Windows
@@ -77,6 +77,27 @@ and model availability can change; the provider's bill is authoritative.
 - Windows and macOS use the same plugin files.
 - A network connection and an API key for the selected provider are required.
 - Final Windows behavior should be verified on a real Windows Photoshop setup.
+
+### Firewalls and proxies
+
+ExactFill connects directly from Photoshop/UXP over HTTPS. If Photoshop is
+restricted by a firewall, proxy or endpoint-security policy, allow outbound TCP
+port 443 to the provider you use:
+
+- OpenAI: `api.openai.com`
+- Google Gemini: `generativelanguage.googleapis.com`
+
+The network permission in `manifest.json` is only a UXP sandbox permission; the
+plugin cannot override an operating-system firewall. On macOS, add these hosts
+to the allow rules for Photoshop/Adobe UXP in your network-filtering tool. On
+Windows, check **Windows Defender Firewall with Advanced Security → Outbound
+Rules** and any third-party firewall. [Microsoft documents](https://learn.microsoft.com/en-us/windows/security/operating-system-security/network-security/windows-firewall/rules#rule-precedence-for-inbound-and-outbound-rules)
+that an explicit Block rule takes priority over a conflicting Allow rule, so a
+broad Photoshop block must be disabled or replaced with a policy that supports
+the required domain exceptions. Do not use fixed IP addresses because provider
+addresses can change.
+
+The same bilingual guidance is included in `INSTALL.txt` inside every release.
 
 ## Reporting problems
 

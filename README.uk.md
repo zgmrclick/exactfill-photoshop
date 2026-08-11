@@ -25,7 +25,7 @@ ExactFill — безкоштовний плагін Photoshop із відкри�
 
 ## Встановлення
 
-Завантажте `ExactFill-1.2.0.zip` зі сторінки
+Завантажте `ExactFill-1.2.1.zip` зі сторінки
 [Releases](https://github.com/zgmrclick/exactfill-photoshop/releases), повністю
 розпакуйте архів і закрийте Photoshop.
 
@@ -74,6 +74,26 @@ ExactFill безкоштовний. OpenAI і Google можуть стягува
 - Для Windows і macOS використовується один і той самий плагін.
 - Потрібні інтернет і API-ключ вибраного провайдера.
 - Фінальну поведінку на Windows слід перевіряти у справжньому Photoshop на Windows.
+
+### Фаєрволи та проксі
+
+ExactFill підключається до провайдера напряму з Photoshop/UXP через HTTPS. Якщо
+фаєрвол, проксі або захисна політика обмежує Photoshop, дозвольте вихідний
+TCP-порт 443 до домену потрібного провайдера:
+
+- OpenAI: `api.openai.com`
+- Google Gemini: `generativelanguage.googleapis.com`
+
+Мережевий дозвіл у `manifest.json` діє лише всередині UXP-пісочниці; плагін не
+може змінити або обійти системний фаєрвол. На macOS додайте ці домени до дозволів
+для Photoshop/Adobe UXP у своїй програмі мережевої фільтрації. На Windows
+перевірте **Windows Defender Firewall with Advanced Security → Outbound Rules**
+і сторонні фаєрволи. [За правилами Microsoft](https://learn.microsoft.com/en-us/windows/security/operating-system-security/network-security/windows-firewall/rules#rule-precedence-for-inbound-and-outbound-rules)
+явний `Block` має пріоритет над суперечливим `Allow`, тому загальне блокування
+Photoshop треба вимкнути або замінити політикою, що підтримує потрібні винятки за
+доменами. Не використовуйте сталі IP-адреси: адреси провайдерів можуть змінюватися.
+
+Така сама двомовна інструкція є в `INSTALL.txt` кожного релізу.
 
 ## Помилки й підтримка
 

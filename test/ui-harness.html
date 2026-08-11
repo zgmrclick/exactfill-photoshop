@@ -20,7 +20,7 @@
         window.open = url => { window.__openedExactFillUrl = url; return null; };
         window.require = name => {
             if (name === './app-info.js') return {
-                version: '1.2.0', issues: 'https://github.com/zgmrclick/exactfill-photoshop/issues/new',
+                version: '1.2.1', issues: 'https://github.com/zgmrclick/exactfill-photoshop/issues/new',
                 privacy: 'https://github.com/zgmrclick/exactfill-photoshop/blob/master/PRIVACY.md', supportUrl: ''
             };
             if (name === './i18n.js') return window.exactFillI18n;

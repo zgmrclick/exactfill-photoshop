@@ -1,6 +1,22 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { parseSse, requestStream, parseRetryAfter, withRetry, HttpError } = require('../providers/http.js');
+const { request, parseSse, requestStream, parseRetryAfter, withRetry, HttpError } = require('../providers/http.js');
+
+test('network failure names the blocked host and firewall action', async () => {
+    const originalFetch = global.fetch;
+    global.fetch = async () => { throw new TypeError('Failed to fetch'); };
+    try {
+        await assert.rejects(
+            request('https://api.openai.com/v1/models', { timeoutMs: 100 }),
+            error => error instanceof HttpError &&
+                error.message.includes('api.openai.com') &&
+                error.message.includes('firewall') &&
+                error.message.includes('outbound HTTPS')
+        );
+    } finally {
+        global.fetch = originalFetch;
+    }
+});
 
 test('parseSse читає OpenAI image events з LF', () => {
     const events = parseSse(

@@ -94,6 +94,9 @@ test('one universal guide documents manual installation on both platforms', () =
     assert.match(guide, /ExactFill/);
     assert.match(guide, /Plug-ins/);
     assert.match(guide, /manifest\.json/);
+    assert.match(guide, /api\.openai\.com/);
+    assert.match(guide, /generativelanguage\.googleapis\.com/);
+    assert.match(guide, /explicit Block rule/);
     assert.equal(fs.existsSync(path.join(ROOT, 'deploy.ps1')), false);
     assert.equal(fs.existsSync(path.join(ROOT, 'Install AI Image.cmd')), false);
 });

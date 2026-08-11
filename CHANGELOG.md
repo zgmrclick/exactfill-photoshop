@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.1 — 2026-08-11
+
+- Added bilingual firewall and proxy guidance for Windows and macOS.
+- Network errors now identify the blocked API host and required outbound HTTPS access.
+- Documented the Windows Firewall rule-precedence limitation for explicit Block rules.
+
 ## 1.2.0 — 2026-08-11
 
 - Public release under the ExactFill name.

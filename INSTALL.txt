@@ -1,4 +1,4 @@
-EXACTFILL 1.2.0 — INSTALLATION
+EXACTFILL 1.2.1 — INSTALLATION
 ================================
 
 ExactFill is the same plugin on Windows and macOS. Extract this ZIP completely,
@@ -16,6 +16,23 @@ WINDOWS
 3. Confirm the Windows administrator prompt if it appears.
 4. Start Photoshop and open Plugins > ExactFill.
 
+NETWORK ACCESS ON WINDOWS
+-------------------------
+ExactFill makes direct HTTPS requests from Photoshop/UXP. If a firewall, proxy,
+endpoint-security product or an outbound policy restricts Photoshop, allow TCP
+port 443 to the provider you use:
+
+   OpenAI:  api.openai.com
+   Gemini:  generativelanguage.googleapis.com
+
+The permission in manifest.json only grants ExactFill access inside the UXP
+sandbox; it cannot override Windows Firewall or third-party security software.
+
+Important: in Microsoft Defender Firewall, an explicit Block rule for Photoshop
+takes priority over a conflicting Allow rule. Such a broad block must be disabled
+or replaced by a policy/firewall that supports the required domain exceptions.
+Do not hard-code the providers' current IP addresses: they can change.
+
 macOS
 -----
 1. Close Photoshop.
@@ -27,11 +44,24 @@ macOS
 3. Enter the macOS administrator password if Finder asks for it.
 4. Start Photoshop and open Plugins > ExactFill.
 
+NETWORK ACCESS ON macOS
+-----------------------
+ExactFill makes direct HTTPS requests from Photoshop/UXP. If a network monitor,
+proxy or third-party firewall restricts Photoshop, allow Photoshop/Adobe UXP to
+connect on TCP port 443 to the provider you use:
+
+   OpenAI:  api.openai.com
+   Gemini:  generativelanguage.googleapis.com
+
+The permission in manifest.json only grants ExactFill access inside the UXP
+sandbox; it cannot override macOS network filters or third-party firewalls.
+Do not hard-code the providers' current IP addresses: they can change.
+
 The final folder must contain manifest.json directly inside it.
 
 =======================================================================
 
-EXACTFILL 1.2.0 — ВСТАНОВЛЕННЯ
+EXACTFILL 1.2.1 — ВСТАНОВЛЕННЯ
 ================================
 
 ExactFill однаковий для Windows і macOS. Повністю розпакуйте ZIP, а потім
@@ -49,6 +79,23 @@ WINDOWS
 3. Підтвердьте запит адміністратора Windows, якщо він з'явиться.
 4. Запустіть Photoshop і відкрийте Plugins > ExactFill.
 
+ДОСТУП ДО МЕРЕЖІ У WINDOWS
+--------------------------
+ExactFill робить прямі HTTPS-запити з Photoshop/UXP. Якщо фаєрвол, проксі,
+захисна програма або політика вихідного трафіку обмежує Photoshop, дозвольте
+TCP-порт 443 до домену потрібного провайдера:
+
+   OpenAI:  api.openai.com
+   Gemini:  generativelanguage.googleapis.com
+
+Дозвіл у manifest.json лише відкриває ExactFill доступ усередині UXP-пісочниці;
+він не може обійти Windows Firewall або сторонню захисну програму.
+
+Важливо: у Microsoft Defender Firewall явне правило Block для Photoshop має
+пріоритет над суперечливим правилом Allow. Таке загальне блокування треба
+вимкнути або замінити політикою/фаєрволом, що підтримує потрібні винятки за
+доменами. Не вписуйте поточні IP-адреси провайдерів: вони можуть змінюватися.
+
 macOS
 -----
 1. Закрийте Photoshop.
@@ -59,5 +106,18 @@ macOS
 
 3. Введіть пароль адміністратора macOS, якщо Finder його попросить.
 4. Запустіть Photoshop і відкрийте Plugins > ExactFill.
+
+ДОСТУП ДО МЕРЕЖІ У macOS
+------------------------
+ExactFill робить прямі HTTPS-запити з Photoshop/UXP. Якщо мережевий монітор,
+проксі або сторонній фаєрвол обмежує Photoshop, дозвольте Photoshop/Adobe UXP
+зʼєднання через TCP-порт 443 із доменом потрібного провайдера:
+
+   OpenAI:  api.openai.com
+   Gemini:  generativelanguage.googleapis.com
+
+Дозвіл у manifest.json лише відкриває ExactFill доступ усередині UXP-пісочниці;
+він не може обійти мережеві фільтри macOS або сторонній фаєрвол. Не вписуйте
+поточні IP-адреси провайдерів: вони можуть змінюватися.
 
 У кінцевій папці manifest.json має лежати безпосередньо всередині ExactFill.
