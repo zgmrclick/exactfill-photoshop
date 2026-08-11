@@ -72,9 +72,11 @@ body {
 
 .grow { flex: 1 1 auto; min-width: 0; }
 
-sp-picker, sp-textfield, sp-number-field { max-width: 100%; }
+sp-picker, sp-textfield, sp-number-field, sp-slider { max-width: 100%; }
 sp-textfield { width: 100%; margin-bottom: 6px; }
 sp-number-field { width: 68px; }
+/* У вузькій панелі slider інакше займає лише мінімальну ширину треку. */
+sp-slider { width: 100%; }
 
 /* ── Сегментований перемикач якості ────────────────────────────────────────── */
 
@@ -275,6 +277,50 @@ sp-number-field { width: 68px; }
     line-height: 1.35;
     overflow-wrap: anywhere;
 }
+
+.usage-summary {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 4px;
+    margin-bottom: 8px;
+}
+.usage-card {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    padding: 5px;
+    background: var(--bg-raise);
+    border-radius: var(--radius);
+}
+.usage-card-label, .usage-card-meta, .usage-meta {
+    color: var(--fg-dim);
+    font-size: 9px;
+}
+.usage-card strong { font-size: 11px; overflow-wrap: anywhere; }
+.usage-card-meta { line-height: 1.25; }
+.usage-subhead {
+    margin: 4px 0;
+    color: var(--fg-dim);
+    font-size: 10px;
+}
+.usage-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 0;
+    border-top: 1px solid var(--line);
+    min-width: 0;
+}
+.usage-info { flex: 1 1 auto; min-width: 0; }
+.usage-main {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.usage-meta { margin-top: 1px; line-height: 1.25; overflow-wrap: anywhere; }
+.usage-amount { flex: 0 0 auto; font-weight: 600; }
+.usage-note { margin-top: 8px; }
 
 /* ── Референси ─────────────────────────────────────────────────────────────── */
 

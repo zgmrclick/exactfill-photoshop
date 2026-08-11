@@ -84,9 +84,15 @@ async function submitAuth() {
     const input = document.getElementById('api-key-input');
     const value = input && input.value && input.value.trim();
     if (!value) return;
-    await setKey(activeKeyName(), value);
-    if (input) input.value = '';
-    await refreshAuthUI();
+    try {
+        await setKey(activeKeyName(), value);
+        if (input) input.value = '';
+        await refreshAuthUI();
+    } catch (e) {
+        console.error('[auth] ключ не збережено:', e && e.message);
+        const status = document.getElementById('auth-status');
+        if (status) status.textContent = `Не вдалося зберегти ключ: ${e && e.message ? e.message : e}`;
+    }
 }
 
 async function toggleAuthEdit() {
@@ -118,10 +124,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const link = document.getElementById('open-key-page');
     if (link) {
-        link.addEventListener('click', e => {
+        link.addEventListener('click', async e => {
             e.preventDefault();
             const url = link.dataset.url;
-            if (url) shell.openExternal(url);
+            if (!url) return;
+            try {
+                await shell.openExternal(url, 'Відкрити офіційну сторінку для створення API-ключа');
+            } catch (err) {
+                console.error('[auth] посилання не відкрилось:', err && err.message);
+                const status = document.getElementById('auth-status');
+                if (status) status.textContent = `Не вдалося відкрити браузер: ${err && err.message ? err.message : err}`;
+            }
         });
     }
 });

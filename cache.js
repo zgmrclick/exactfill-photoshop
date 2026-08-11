@@ -40,7 +40,8 @@ function readIndex() {
     try {
         const raw = localStorage.getItem(INDEX_KEY);
         const arr = raw ? JSON.parse(raw) : [];
-        return Array.isArray(arr) ? arr : [];
+        return Array.isArray(arr) ? arr.filter(e => e && typeof e.id === 'string' &&
+            typeof e.name === 'string' && /^[A-Za-z0-9._-]+$/.test(e.name)) : [];
     } catch (e) {
         console.warn('[cache] індекс побитий, починаю з чистого:', e.message);
         return [];

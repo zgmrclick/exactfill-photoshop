@@ -18,6 +18,7 @@
 const { buildMultipart, request, requestStream, withRetry, HttpError } = require('./http.js');
 
 const BASE = 'https://api.openai.com/v1/';
+const PARTIAL_IMAGES = 3;
 
 /** Геометричні можливості моделей — читає geometry.js, не хардкодить сам. */
 const ARBITRARY = {
@@ -81,6 +82,30 @@ const blobName = (blob, i) => {
 };
 
 /**
+ * Спільний читач SSE для /images/edits і /images/generations.
+ * OpenAI віддає до трьох partial-подій, потім одну completed-подію.
+ */
+async function readImageStream({ url, headers, body, signal, onPartial,
+                                 partialType, completedType }) {
+    let done = null;
+    const last = await requestStream(url, { method: 'POST', headers, body, signal }, ev => {
+        if (!ev || !ev.type) return;
+        if (ev.type === partialType && ev.b64_json) {
+            onPartial(ev.b64_json, ev.partial_image_index);
+        } else if (ev.type === completedType) {
+            done = ev;
+        } else if (ev.type === 'error' || ev.error) {
+            throw new HttpError(0, ev.error?.message || 'Помилка в потоці OpenAI');
+        }
+    });
+    const fin = done || last;
+    if (!fin || fin.type !== completedType || !fin.b64_json) {
+        throw new HttpError(0, 'Потік OpenAI завершився без готового зображення');
+    }
+    return { images: [fin.b64_json], usage: fin.usage || null };
+}
+
+/**
  * Редагування наявних пікселів — основний шлях плагіна.
  *
  * imageBlob — захоплена область (PNG без втрат або JPEG, див. capture.js).
@@ -121,29 +146,22 @@ async function editImage({ apiKey, model, prompt, imageBlob, maskBlob, reference
     if (model !== 'gpt-image-2') {
         fields.push({ name: 'input_fidelity', data: 'high' });
     }
-    if (onPartial) fields.push({ name: 'stream', data: 'true' });
+    if (onPartial) {
+        fields.push({ name: 'stream', data: 'true' });
+        // За замовчуванням partial_images=0: сервер тоді надсилає лише completed.
+        fields.push({ name: 'partial_images', data: String(PARTIAL_IMAGES) });
+    }
 
     const { body, contentType } = await buildMultipart(fields);
     const headers = { ...authHeader(apiKey), 'Content-Type': contentType };
     const url = `${BASE}images/edits`;
 
     if (onPartial) {
-        let done = null;
-        const last = await requestStream(url, { method: 'POST', headers, body, signal }, ev => {
-            if (!ev || !ev.type) return;
-            if (ev.type === 'image_edit.partial_image' && ev.b64_json) {
-                onPartial(ev.b64_json, ev.partial_image_index);
-            } else if (ev.type === 'image_edit.completed') {
-                done = ev;
-            } else if (ev.type === 'error' || ev.error) {
-                throw new HttpError(0, ev.error?.message || 'Помилка в потоці OpenAI');
-            }
+        return readImageStream({
+            url, headers, body, signal, onPartial,
+            partialType: 'image_edit.partial_image',
+            completedType: 'image_edit.completed',
         });
-        const fin = done || last;
-        if (!fin || !fin.b64_json) {
-            throw new HttpError(0, 'Потік OpenAI завершився без готового зображення');
-        }
-        return { images: [fin.b64_json], usage: fin.usage || null };
     }
 
     const json = await request(url, { method: 'POST', headers, body, signal });
@@ -151,16 +169,33 @@ async function editImage({ apiKey, model, prompt, imageBlob, maskBlob, reference
 }
 
 /** Генерація з нуля — коли пікселі свідомо ігноруються. */
-async function generateFresh({ apiKey, model, prompt, plan, background, signal }) {
+async function generateFresh({ apiKey, model, prompt, plan, background, signal, onPartial }) {
     const payload = { model, prompt, n: 1, output_format: 'png' };
     if (plan.size) payload.size = plan.size;
     if (plan.quality && plan.quality !== 'auto') payload.quality = plan.quality;
     if (background) payload.background = background;
 
-    const json = await request(`${BASE}images/generations`, {
+    if (onPartial) {
+        payload.stream = true;
+        payload.partial_images = PARTIAL_IMAGES;
+    }
+
+    const url = `${BASE}images/generations`;
+    const headers = { ...authHeader(apiKey), 'Content-Type': 'application/json' };
+    const body = JSON.stringify(payload);
+
+    if (onPartial) {
+        return readImageStream({
+            url, headers, body, signal, onPartial,
+            partialType: 'image_generation.partial_image',
+            completedType: 'image_generation.completed',
+        });
+    }
+
+    const json = await request(url, {
         method: 'POST',
-        headers: { ...authHeader(apiKey), 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        headers,
+        body,
         signal,
     });
     return { images: extractImages(json, 1), usage: json.usage || null };
@@ -168,8 +203,8 @@ async function generateFresh({ apiKey, model, prompt, plan, background, signal }
 
 /**
  * Єдиний вихід контракту: { images: [base64 PNG], usage }.
- * usage приходить від самого API (input_tokens / output_tokens / image_tokens) —
- * тому облік витрат не потребує захардкодженого прайсу, який усе одно старіє.
+ * usage приходить від самого API (input_tokens / output_tokens / image_tokens),
+ * а usage.js оцінює USD за версіонованою таблицею офіційних тарифів.
  */
 async function generate({ apiKey, model, prompt, imageBlob, maskBlob, references,
                           plan, background, ignorePixels, signal, onPartial, onProgress }) {
@@ -181,7 +216,7 @@ async function generate({ apiKey, model, prompt, imageBlob, maskBlob, references
     const res = await withRetry(() => (useEdit
         ? editImage({ apiKey, model, prompt, imageBlob, maskBlob, references,
                       plan, background, signal, onPartial })
-        : generateFresh({ apiKey, model, prompt, plan, background, signal })));
+        : generateFresh({ apiKey, model, prompt, plan, background, signal, onPartial })), { signal });
     if (onProgress) onProgress('Готово');
     return res;
 }

@@ -10,7 +10,8 @@ class HistoryManager {
         try {
             const stored = localStorage.getItem(this.storageKey);
             if (stored) {
-                this.history = JSON.parse(stored);
+                const parsed = JSON.parse(stored);
+                this.history = Array.isArray(parsed) ? parsed.filter(x => x && typeof x === 'object') : [];
             }
         } catch (e) {
             console.warn("Failed to load history:", e);
@@ -29,7 +30,7 @@ class HistoryManager {
 
     getAll() {
         // Return reverse chronological order (newest first)
-        return this.history.slice().reverse();
+        return (Array.isArray(this.history) ? this.history : []).slice().reverse();
     }
 
     add(entry) {
@@ -41,6 +42,7 @@ class HistoryManager {
         };
 
         // Add to end
+        if (!Array.isArray(this.history)) this.history = [];
         this.history.push(item);
 
         // Trim to max size (remove from start/oldest)

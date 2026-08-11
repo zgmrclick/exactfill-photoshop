@@ -20,7 +20,10 @@ class PresetManager {
         try {
             const stored = localStorage.getItem(this.storageKey);
             if (stored) {
-                this.presets = JSON.parse(stored);
+                const parsed = JSON.parse(stored);
+                this.presets = Array.isArray(parsed)
+                    ? parsed.filter(x => x && typeof x === 'object' && typeof x.id === 'string')
+                    : JSON.parse(JSON.stringify(DEFAULT_PRESETS));
             } else {
                 this.presets = JSON.parse(JSON.stringify(DEFAULT_PRESETS));
                 this.save(); // Initialize default in storage
@@ -41,7 +44,7 @@ class PresetManager {
     }
 
     getAll() {
-        return this.presets;
+        return Array.isArray(this.presets) ? this.presets : [];
     }
 
     add(name, content) {
@@ -51,6 +54,7 @@ class PresetManager {
             content: content || '',
             active: false
         };
+        if (!Array.isArray(this.presets)) this.presets = [];
         this.presets.push(newPreset);
         this.save();
         return newPreset;

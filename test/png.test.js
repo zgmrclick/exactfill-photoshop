@@ -87,7 +87,7 @@ console.log('\n=== buildRectMaskPng: мʼякий край ===');
 {
   const W=1024,H=1024,R={left:200,top:150,right:800,bottom:650};
   const stride=W*2+1;
-  for(const f of [0,4,8,16,32,64]){
+  for(const f of [0,4,8,16,32,64,128,256]){
     const png=P.buildRectMaskPng(W,H,R,f);
     let off=8,idat=null;
     while(off<png.length){
@@ -99,7 +99,10 @@ console.log('\n=== buildRectMaskPng: мʼякий край ===');
     const raw=zlib.inflateSync(Buffer.from(idat));
     const alpha=(x,y)=>raw[y*stride+1+x*2+1];
     const inside=alpha(500,400), edge=alpha(R.left,400), outside=alpha(100,400);
-    const ok = raw.length===H*stride && inside===0 && outside===255 &&
+    // Для дуже широкого feather точка x=100 сама вже лежить у градієнті;
+    // тоді перевіряємо, що вона світліша за межу, а не вимагаємо alpha=255.
+    const outsideOk = f <= 64 ? outside===255 : outside>edge;
+    const ok = raw.length===H*stride && inside===0 && outsideOk &&
                (f<1 ? edge===0 : Math.abs(edge-128)<=1);
     console.log(`  край ${String(f).padStart(2)} px: ${(png.length/1024).toFixed(1)} КБ  `+
                 `alpha усередині=${inside} на межі=${edge} поза=${outside} ${ok?'✓':'✗'}`);

@@ -1,7 +1,7 @@
 {
   "id": "ai-image-ps",
   "name": "AI Image",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "main": "index.html",
   "host": {
     "app": "PS",
@@ -10,6 +10,9 @@
   "manifestVersion": 5,
   "requiredPermissions": {
     "localFileSystem": "request",
+    "launchProcess": {
+      "schemes": ["https"]
+    },
     "network": {
       "domains": [
         "https://api.openai.com",

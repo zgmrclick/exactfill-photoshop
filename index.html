@@ -15,6 +15,7 @@
     <sp-textfield id="api-key-input" type="password" placeholder="Вставте ключ">
     </sp-textfield>
     <sp-button id="submit-auth" variant="cta" size="s">Зберегти ключ</sp-button>
+    <p id="auth-status" class="status"></p>
 </div>
 
 <!-- ── Основна панель ───────────────────────────────────────────────────── -->
@@ -38,31 +39,84 @@
         <div id="quality-toggle" class="seg"></div>
     </div>
 
-    <div class="row">
-        <label class="lbl" title="Скільки оточення надіслати моделі як контекст">Контекст %</label>
-        <sp-number-field id="context-pad" size="s" min="0" max="50" step="5" value="15"></sp-number-field>
+    <p id="plan-line" class="plan"></p>
 
-        <label class="lbl lbl-2" title="Розмиття краю: і маски запиту, і маски шару">Край px</label>
-        <sp-number-field id="edge-feather" size="s" min="0" max="64" step="2" value="8"></sp-number-field>
+    <div class="row gen-row">
+        <sp-button id="generate-btn" variant="cta" class="grow">Генерувати</sp-button>
+        <sp-button id="cancel-btn" size="s" variant="secondary" class="hidden">Скасувати</sp-button>
+        <div id="spinner" class="spinner hidden"></div>
+    </div>
+    <div class="row">
+        <sp-button id="regen-btn" size="s" quiet class="grow" disabled
+            title="Той самий промпт і та сама область — без нового виділення">Перегенерувати</sp-button>
     </div>
 
-    <div class="checks">
-        <sp-checkbox id="use-layer-only" size="s"
-            title="Надіслати лише активний шар замість зведеного зображення">Лише активний шар</sp-checkbox>
-        <sp-checkbox id="lossless-input" size="s" checked
-            title="PNG замість JPEG: без артефактів на дрібному шрифті. Вище 2 МП автоматично JPEG">Вхід без втрат</sp-checkbox>
-        <sp-checkbox id="transparent-bg" size="s"
-            title="background=transparent — лише OpenAI">Прозорий фон</sp-checkbox>
-        <sp-checkbox id="ignore-pixels" size="s"
-            title="Генерувати з нуля, не дивлячись на наявні пікселі">Ігнорувати пікселі</sp-checkbox>
-        <sp-checkbox id="live-preview" size="s" checked
-            title="Проміжні кадри під час генерації — лише OpenAI">Живий прев'ю</sp-checkbox>
+    <p id="status-text" class="status"></p>
+    <p id="residual-text" class="residual"></p>
+
+    <div id="preview-wrap" class="preview hidden">
+        <img id="preview-img" alt="прев'ю">
+    </div>
+
+    <p id="cost-line" class="cost hidden"></p>
+
+    <!-- Постійна статистика: localStorage переживає закриття панелі й Photoshop. -->
+    <div class="section collapsible">
+        <div id="usage-header" class="head">
+            <span>Статистика витрат</span><span id="usage-badge" class="badge hidden"></span>
+        </div>
+        <div id="usage-body" class="body hidden">
+            <div id="usage-summary" class="usage-summary"></div>
+            <p class="usage-subhead">Останні запити</p>
+            <div id="usage-list"></div>
+            <p class="hint usage-note">Суми — оцінка в USD за стандартним API-прайсом,
+               перевіреним 11.08.2026. Фактичний білінг може трохи відрізнятися через
+               кешування та округлення провайдера. Зберігаються останні 500 запитів,
+               але не довше року.</p>
+            <sp-button id="clear-usage-btn" size="s" quiet>Очистити статистику</sp-button>
+        </div>
+    </div>
+
+    <!-- Додаткові налаштування. Розгорнуто за замовчуванням, бо перевірка
+         рендеру повзунків міряє offsetHeight, а він нульовий у схованому блоці. -->
+    <div class="section collapsible">
+        <div id="opts-header" class="head"><span>Налаштування області та краю</span></div>
+        <div id="opts-body" class="body">
+            <!-- sp-slider, а не sp-number-field: останнього в переліку віджетів UXP
+                 немає, і він молча не малюється — лишались самі підписи. -->
+            <div class="field">
+                <sp-slider id="context-pad" min="0" max="50" step="5" value="15" value-label="%"
+                           title="Скільки оточення надіслати моделі як контекст">
+                    <sp-label slot="label">Контекст навколо</sp-label>
+                </sp-slider>
+            </div>
+
+            <div class="field">
+                <sp-slider id="edge-feather" min="0" max="256" step="2" value="16" value-label=" px"
+                           title="Ширина плавного переходу всередині області; за її межею AI-шар повністю прихований">
+                    <sp-label slot="label">Змішування краю</sp-label>
+                </sp-slider>
+            </div>
+
+            <div class="checks">
+                <sp-checkbox id="use-layer-only" size="s"
+                    title="Надіслати лише активний шар замість зведеного зображення">Лише активний шар</sp-checkbox>
+                <sp-checkbox id="lossless-input" size="s" checked
+                    title="PNG замість JPEG: без артефактів на дрібному шрифті. Вище 2 МП автоматично JPEG">Вхід без втрат</sp-checkbox>
+                <sp-checkbox id="transparent-bg" size="s"
+                    title="background=transparent — лише OpenAI">Прозорий фон</sp-checkbox>
+                <sp-checkbox id="ignore-pixels" size="s"
+                    title="Генерувати з нуля, не дивлячись на наявні пікселі">Ігнорувати пікселі</sp-checkbox>
+                <sp-checkbox id="live-preview" size="s" checked
+                    title="Проміжні кадри під час генерації — лише OpenAI">Живий прев'ю</sp-checkbox>
+            </div>
+        </div>
     </div>
 
     <!-- Референси -->
     <div class="section collapsible">
         <div id="ref-header" class="head">
-            <span>Референсні зображення</span><span id="ref-count" class="badge"></span>
+            <span>Референсні зображення</span><span id="ref-count" class="badge hidden"></span>
         </div>
         <div id="ref-body" class="body hidden">
             <p class="hint">Приклади стилю або товару. Перше зображення — завжди ваша виділена
@@ -75,31 +129,10 @@
         </div>
     </div>
 
-    <p id="plan-line" class="plan"></p>
-
-    <div class="row gen-row">
-        <sp-button id="generate-btn" variant="cta" class="grow">Генерувати</sp-button>
-        <sp-button id="cancel-btn" size="s" variant="secondary" class="hidden">Скасувати</sp-button>
-        <div id="spinner" class="spinner hidden"></div>
-    </div>
-    <div class="row gen-row">
-        <sp-button id="regen-btn" size="s" quiet class="grow" disabled
-            title="Той самий промпт і та сама область — без нового виділення">Перегенерувати</sp-button>
-    </div>
-
-    <p id="status-text" class="status"></p>
-    <p id="residual-text" class="residual"></p>
-
-    <div id="preview-wrap" class="preview hidden">
-        <img id="preview-img" alt="прев'ю">
-    </div>
-
-    <p id="cost-line" class="cost"></p>
-
     <!-- Кеш результатів -->
     <div class="section collapsible">
         <div id="cache-header" class="head">
-            <span>Кеш результатів</span><span id="cache-badge" class="badge"></span>
+            <span>Кеш результатів</span><span id="cache-badge" class="badge hidden"></span>
         </div>
         <div id="cache-body" class="body hidden">
             <p class="hint">Останні результати лежать на диску. Повторна вставка з кешу —
@@ -112,7 +145,7 @@
     <!-- Пресети -->
     <div class="section collapsible">
         <div id="preset-header" class="head">
-            <span>Пресети промпту</span><span id="preset-count" class="badge"></span>
+            <span>Пресети промпту</span><span id="preset-count" class="badge hidden"></span>
         </div>
         <div id="preset-body" class="body hidden">
             <div id="preset-list"></div>

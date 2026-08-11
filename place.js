@@ -17,7 +17,7 @@
  *  Протоколи: verify/probe6.txt (цей алгоритм), verify/probe2-5.txt (як
  *  до нього дійшли). Метрика в консолі — report.residual, мусить бути нулем.
  * ========================================================================== */
-const { app, core, imaging } = require('photoshop');
+const { app, core, imaging, constants } = require('photoshop');
 const { batchPlay } = require('photoshop').action;
 const uxpStorage = require('uxp').storage;
 
@@ -187,13 +187,14 @@ async function setResizeDuringPlace(value) {
 }
 
 /* Геометрія — у geometry.js (чистий модуль, протестований у node на 9 випадках). */
-const { integerTarget, planFrame } = require('./geometry.js');
+const { integerTarget, insetBlendRadius, planFrame } = require('./geometry.js');
 
 /* ══════════════════════════════════════════════════════════════════════════
  *  ГОЛОВНА ФУНКЦІЯ
  *  b64        — PNG у base64 від провайдера
  *  bounds     — межі виділення в пікселях документа (можуть бути дробові)
- *  channelName— альфа-канал зі збереженим виділенням (для маски); null = без маски
+ *  channelName— альфа-канал зі збереженим виділенням; null = прямокутна маска
+ *  opts.maskBounds — початкові межі виділення для гарантованого fallback
  *  Викликати ВСЕРЕДИНІ core.executeAsModal.
  * ═════════════════════════════════════════════════════════════════════════ */
 async function placeGeneratedSmartObject(b64, bounds, channelName, opts = {}) {
@@ -319,14 +320,17 @@ async function placeGeneratedSmartObject(b64, bounds, channelName, opts = {}) {
 
         /* 6. Маска шару: показуємо рівно виділення. Для cover це ще й обріз
               надлишку; для exact — захист від субпіксельного краю. */
-        if (channelName) await applySelectionMask(channelName, target, maskFeather);
+        const maskTarget = integerTarget(opts.maskBounds || target);
+        const maskApplied = await applySelectionMask(channelName, maskTarget, maskFeather);
+        report.mask = { applied: maskApplied, source: channelName ? 'selection' : 'rectangle',
+            feather: maskFeather };
+        if (!maskApplied) throw new Error('Photoshop не створив маску шару');
 
         console.log('[place]', JSON.stringify(report));
         return report;
 
     } catch (e) {
         console.error('[place] помилка:', e && e.message);
-        try { await core.showAlert(`Вставка не вдалась:\n${e && e.message}`); } catch (_) {}
         throw e;
     } finally {
         // У цьому шляху disposables лишається порожнім — і це головна перемога:
@@ -340,44 +344,77 @@ async function placeGeneratedSmartObject(b64, bounds, channelName, opts = {}) {
 
 /**
  * Відновлює виділення з альфа-каналу (резерв — прямокутник) і робить маску.
+ * Повертає true лише коли команда створення layer mask справді виконалась.
  *
- * feather — розмиття межі маски В ПІКСЕЛЯХ. Це ДРУГА маска, не та, що йде в
- * OpenAI: request-маску Gemini не приймає взагалі, а ця працює на боці
- * Photoshop і тому мʼякшить шов однаково для обох провайдерів. Саме її варто
- * крутити, коли «видно, де вставлено».
+ * feather — ширина ВНУТРІШНЬОГО переходу маски в пікселях. Це ДРУГА маска,
+ * не та, що йде в OpenAI: request-маску Gemini не приймає взагалі, а ця
+ * працює на боці Photoshop для обох провайдерів.
+ *
+ * Важливо: звичайний feather симетричний і виходить за межу виділення. Якщо
+ * контекст навколо вужчий за feather, напівпрозора маска доходить до фізичного
+ * краю Smart Object і там виникає новий різкий шов. Тому contract + feather
+ * розміщує весь перехід ВСЕРЕДИНІ початкової області: на її межі AI-шар уже
+ * повністю прихований, а в центрі лишається повністю непрозорим.
  */
 async function applySelectionMask(channelName, target, feather = 0) {
     const restore = async () => {
+        if (channelName) {
+            try {
+                const channel = app.activeDocument.channels.getByName(channelName);
+                await app.activeDocument.selection.load(channel, constants.SelectionType.REPLACE);
+                return true;
+            } catch (e) {
+                console.warn('[place] selection-канал не відновився, беру прямокутник:', e.message);
+            }
+        }
         try {
-            await batchPlay([{ _obj: 'set', _target: { _ref: 'selection' },
-                to: { _ref: 'channel', _name: channelName } }], {});
+            await app.activeDocument.selection.selectRectangle({
+                top: target.top, left: target.left,
+                bottom: target.bottom, right: target.right,
+            }, constants.SelectionType.REPLACE, 0, false);
             return true;
         } catch (e) {
-            try {
-                await batchPlay([{ _obj: 'set', _target: { _ref: 'selection' },
-                    to: { _obj: 'rectangle',
-                        top: PX(target.top), left: PX(target.left),
-                        bottom: PX(target.bottom), right: PX(target.right) } }], {});
-                return true;
-            } catch (e2) { return false; }
+            console.error('[place] прямокутне виділення для маски не створилось:', e.message);
+            return false;
         }
     };
     if (!await restore()) return;
     if (feather > 0) {
-        // Feather Selection ДО створення маски: розмити вже готову маску
-        // складніше (потрібен вибір каналу маски й Gaussian Blur), а тут
-        // Photoshop робить те саме одним кроком.
+        // Використовуємо офіційний DOM API (PS 25+), а не сирий batchPlay
+        // `_obj: feather`. Останній у PS 27.5 показував системний діалог
+        // «Команда Растушевка сейчас недоступна», навіть коли помилку ловив catch.
+        //
+        // Стискаємо selection перед feather, щоб зовнішній край градієнта
+        // закінчився на початковій межі, а не звисав до краю Smart Object.
         try {
-            await batchPlay([{ _obj: 'feather', radius: PX(feather),
-                _options: { dialogOptions: 'dontDisplay' } }], {});
-        } catch (e) { console.warn('[place] розмиття виділення не вдалось:', e.message); }
+            const sel = app.activeDocument.selection;
+            const b = sel && sel.bounds;
+            if (b) {
+                const radius = insetBlendRadius(b, feather);
+                if (radius >= 1) {
+                    await sel.contract(radius, true);
+                    await sel.feather(radius, true);
+                    console.log(`[place] внутрішнє змішування: ${radius * 2} px ` +
+                                `(contract ${radius} + feather ${radius})`);
+                }
+            }
+        } catch (e) {
+            // contract міг змінити selection до помилки feather — відновлюємо
+            // вихідну форму, щоб не створити випадково обрізану маску.
+            console.warn('[place] внутрішнє змішування не вдалось:', e.message);
+            await restore();
+        }
     }
     try {
         await batchPlay([{ _obj: 'make', new: { _class: 'channel' },
             at: { _ref: 'channel', _enum: 'channel', _value: 'mask' },
             using: { _enum: 'userMaskEnabled', _value: 'revealSelection' } }], {});
-    } catch (e) { console.error('[place] маска не створилась:', e.message); }
+    } catch (e) {
+        console.error('[place] маска не створилась:', e.message);
+        return false;
+    }
     await restore();
+    return true;
 }
 
 module.exports = {

@@ -29,6 +29,26 @@ function integerTarget(bounds) {
 }
 
 /**
+ * Радіус для внутрішнього змішування layer mask.
+ *
+ * Користувацьке значення означає повну ширину переходу. Photoshop feather
+ * розтікається по обидва боки поточної межі, тому спершу стискаємо selection
+ * на половину ширини, а потім feather-имо на той самий радіус. Зовнішній край
+ * градієнта тоді закінчується на початковій межі виділення і не може дійти до
+ * фізичного краю Smart Object.
+ */
+function insetBlendRadius(bounds, blendWidth) {
+    const w = Math.max(0, unwrap(bounds.right) - unwrap(bounds.left));
+    const h = Math.max(0, unwrap(bounds.bottom) - unwrap(bounds.top));
+    const wanted = Math.max(0, Number(blendWidth) || 0) / 2;
+
+    // Після contract + feather має лишитися непрозоре ядро. Інакше велике
+    // значення на маленькому виділенні зробить увесь результат напівпрозорим.
+    const maxRadius = Math.max(0, Math.min(w, h) / 4 - 1);
+    return Math.floor(Math.min(wanted, maxRadius, 500));
+}
+
+/**
  * Куди ставити рамку Smart Object.
  *   'exact' — рівно у виділення. Пропорція збіглась із точністю ASPECT_TOL,
  *             залишкова нерівномірність невидима (≤0.5 %).
@@ -190,13 +210,24 @@ function planRequest(caps, target, quality = 'medium') {
         return { size: bestFixedSize(target, caps.sizes), quality };
     }
     if (caps.aspects) {
-        const budget = QUALITY_BUDGET[quality] ?? QUALITY_BUDGET.medium;
-        const order  = caps.imageSizes || ['1K'];
-        // 1K≈1 MP, 2K≈4 MP, 4K≈16 MP — беремо найбільший, що влазить у бюджет
+        // 1K≈1 MP, 2K≈4 MP, 4K≈16 MP
         const px = { '512': 262_144, '1K': 1_048_576, '2K': 4_194_304, '4K': 16_777_216 };
-        let pick = order[0];
-        for (const s of order) if ((px[s] || 0) <= budget) pick = s;
-        return { aspectRatio: bestAspect(target, caps.aspects), imageSize: pick };
+        const order = (caps.imageSizes || ['1K']).slice()
+            .sort((a, b) => (px[a] || 0) - (px[b] || 0));
+
+        // Раніше тут брався найбільший розмір, що влазить у бюджет якості. Пороги
+        // сходились погано: 1K = 1.05 MP, 2K = 4.19 MP, а бюджети 1.2 / 3 / 8.29 MP —
+        // тому low І medium давали однакове 1K, і повзунок був майже декоративним.
+        // Рівні Gemini дискретні, тому й вибираємо їх позицією, а не арифметикою.
+        const idx = { low: 0, medium: 1, high: order.length - 1, auto: 1 };
+        let i = Math.min(idx[quality] ?? 1, order.length - 1);
+
+        // Але не просити безглуздо більше за саму область: для виділення 200×200
+        // «висока якість» інакше замовляла б 4K = 16 MP, які одразу викидаються.
+        const ceiling = target.w * target.h * 8;
+        while (i > 0 && (px[order[i]] || 0) > ceiling) i--;
+
+        return { aspectRatio: bestAspect(target, caps.aspects), imageSize: order[i] };
     }
     return { quality };
 }
@@ -204,6 +235,7 @@ function planRequest(caps, target, quality = 'medium') {
 module.exports = {
     unwrap,
     integerTarget,
+    insetBlendRadius,
     planFrame,
     exactSize,
     bestFixedSize,

@@ -159,7 +159,16 @@ function errorFromBody(res, text) {
         if (text) msg += `: ${text.slice(0, 300)}`;
     }
     const ra = res.headers && res.headers.get ? res.headers.get('retry-after') : null;
-    return new HttpError(res.status, msg, ra ? Number(ra) : null);
+    return new HttpError(res.status, msg, parseRetryAfter(ra));
+}
+
+/** Retry-After буває секундами або HTTP-датою; обидві форми стандартні. */
+function parseRetryAfter(value, now = Date.now()) {
+    if (value === null || value === undefined || value === '') return null;
+    const seconds = Number(value);
+    if (Number.isFinite(seconds)) return Math.max(0, seconds);
+    const at = Date.parse(String(value));
+    return Number.isFinite(at) ? Math.max(0, (at - now) / 1000) : null;
 }
 
 /**
@@ -200,7 +209,10 @@ async function requestStream(url, { method = 'POST', headers = {}, body, timeout
             for (;;) {
                 const { done, value } = await reader.read();
                 if (done) break;
-                buf += bytesToStr(value);
+                // SSE дозволяє і LF, і CRLF. Нормалізуємо одразу, інакше
+                // `\r\n\r\n` не знаходиться як `\n\n`, а кадри накопичуються
+                // до завершення запиту й перестають бути живим preview.
+                buf += bytesToStr(value).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
                 // подія завершується порожнім рядком; тримаємо хвіст у буфері
                 const cut = buf.lastIndexOf('\n\n');
                 if (cut >= 0) { feed(buf.slice(0, cut + 2)); buf = buf.slice(cut + 2); }
@@ -233,7 +245,8 @@ function bytesToStr(bytes) {
 /** Розбирає блок SSE у масив об'єктів із рядків `data:`. */
 function parseSse(chunk) {
     const out = [];
-    for (const block of String(chunk).split(/\n\n/)) {
+    const normalized = String(chunk).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    for (const block of normalized.split(/\n\n/)) {
         const dataLines = [];
         for (const line of block.split(/\n/)) {
             if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
@@ -248,8 +261,26 @@ function parseSse(chunk) {
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+/** Очікування ретраю, яке переривається кнопкою «Скасувати» одразу. */
+function sleepWithSignal(ms, signal) {
+    if (!signal) return sleep(ms);
+    if (signal.aborted) return Promise.reject(new Cancelled());
+    return new Promise((resolve, reject) => {
+        const onAbort = () => {
+            clearTimeout(timer);
+            try { signal.removeEventListener('abort', onAbort); } catch (e) {}
+            reject(new Cancelled());
+        };
+        const timer = setTimeout(() => {
+            try { signal.removeEventListener('abort', onAbort); } catch (e) {}
+            resolve();
+        }, ms);
+        signal.addEventListener('abort', onAbort);
+    });
+}
+
 /** Ретрай лише того, що варто ретраїти, з повагою до Retry-After. */
-async function withRetry(fn, { tries = 4, baseDelay = 1200 } = {}) {
+async function withRetry(fn, { tries = 4, baseDelay = 1200, signal } = {}) {
     let last;
     for (let attempt = 0; attempt < tries; attempt++) {
         try {
@@ -261,10 +292,10 @@ async function withRetry(fn, { tries = 4, baseDelay = 1200 } = {}) {
             if (e && e.cancelled) throw e;
             const status = e && e.status;
             if (!RETRYABLE(status) || attempt === tries - 1) throw e;
-            const wait = (e.retryAfter ? e.retryAfter * 1000 : baseDelay * Math.pow(2, attempt))
+            const wait = (Number.isFinite(e.retryAfter) ? e.retryAfter * 1000 : baseDelay * Math.pow(2, attempt))
                        + Math.floor(Math.random() * 300);
             console.log(`[http] ${status} — повтор ${attempt + 1}/${tries - 1} через ${wait} мс`);
-            await sleep(wait);
+            await sleepWithSignal(wait, signal);
         }
     }
     throw last;
@@ -273,4 +304,5 @@ async function withRetry(fn, { tries = 4, baseDelay = 1200 } = {}) {
 module.exports = {
     strToBytes, blobToBase64, buildMultipart,
     request, requestStream, withRetry, HttpError, Cancelled, RETRYABLE, sleep,
+    sleepWithSignal, parseRetryAfter, parseSse,
 };

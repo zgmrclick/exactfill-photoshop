@@ -22,13 +22,14 @@ const capture    = require('./capture.js');
 const cache      = require('./cache.js');
 const presetManager  = require('./presets.js');
 const historyManager = require('./history.js');
+const usageTracker   = require('./usage.js');
 
 const LS = {
     provider: 'ai_provider', model: 'ai_model', quality: 'ai_quality',
     prompt: 'ai_prompt', layerOnly: 'ai_layer_only', pad: 'ai_context_pad',
     feather: 'ai_edge_feather', lossless: 'ai_lossless', transparent: 'ai_transparent',
     ignorePixels: 'ai_ignore_pixels', preview: 'ai_live_preview',
-    session: 'ai_session_usage',
+    usage: 'ai_usage_ledger_v1',
 };
 
 const $ = id => document.getElementById(id);
@@ -38,6 +39,7 @@ let busy = false;
 let abortCtrl = null;
 let references = [];        // [{ name, blob }]
 let lastRun = null;         // { prompt, provider, model, ctx, target, ... }
+let modelRefreshSeq = 0;    // захист від перегонів при швидкій зміні провайдера
 
 /* ── Виділення ─────────────────────────────────────────────────────────────── */
 
@@ -96,7 +98,7 @@ function readSettings() {
     return {
         quality: localStorage.getItem(LS.quality) || 'medium',
         padPercent: num('context-pad', 15, 0, 50),
-        feather: num('edge-feather', 8, 0, 64),
+        feather: num('edge-feather', 16, 0, 256),
         layerOnly: checked('use-layer-only'),
         lossless: checked('lossless-input'),
         transparent: checked('transparent-bg'),
@@ -132,39 +134,163 @@ function showPreview(b64) {
     wrap.classList.remove('hidden');
 }
 
-/** sp-picker у частині версій PS не оновлюється через innerHTML — перестворюємо. */
+/**
+ * Бейдж-лічильник біля заголовка секції.
+ * ⚠️ НЕ через CSS `.badge:empty` — UXP цей псевдоклас не підтримує, і порожній
+ * бейдж малювався як синій кружечок біля кожної секції.
+ */
+function setBadge(id, text) {
+    const el = $(id);
+    if (!el) return;
+    el.textContent = text || '';
+    el.classList.toggle('hidden', !text);
+}
+
+/**
+ * Гарантує, що керування числом видно.
+ *
+ * ⚠️ ЧОМУ ЦЕ ПОТРІБНО: UXP не малює компоненти, яких немає в його переліку, і
+ * робить це МОЛЧА — `sp-number-field` залишав у панелі самі підписи без полів.
+ * `sp-slider` задокументований, але страхуємось так само, як із потоковим
+ * fetch: якщо після рендеру висота нульова, підміняємо сегментним перемикачем
+ * зі звичайних <button>, які в цій панелі демонстративно працюють (якість).
+ *
+ * Підміна зберігає той самий id і властивість .value, тому решта коду читає
+ * значення однаково і про підміну не знає.
+ */
+function ensureNumericControl(id, lsKey, values, unit) {
+    const el = $(id);
+    if (!el) return;
+    if (el.offsetHeight > 0) return;          // намалювався — нічого не робимо
+
+    console.log(`[ui] ${id}: sp-slider не намалювався — ставлю сегментний перемикач`);
+    const saved = Number(localStorage.getItem(lsKey));
+    const initial = values.includes(saved) ? saved : values[Math.floor(values.length / 2)];
+
+    const field = document.createElement('div');
+    field.className = 'field';
+    const label = document.createElement('label');
+    label.className = 'lbl';
+    label.textContent = el.querySelector('sp-label')?.textContent || id;
+    const seg = document.createElement('div');
+    seg.className = 'seg';
+
+    const holder = document.createElement('div');
+    holder.id = id;                            // той самий id
+    holder.value = String(initial);
+    holder.style.display = 'none';
+
+    for (const v of values) {
+        const btn = document.createElement('button');
+        btn.className = 'seg-btn' + (v === initial ? ' active' : '');
+        btn.textContent = v + unit;
+        btn.dataset.value = String(v);
+        btn.addEventListener('click', () => {
+            holder.value = String(v);
+            localStorage.setItem(lsKey, String(v));
+            seg.querySelectorAll('.seg-btn').forEach(b =>
+                b.classList.toggle('active', b.dataset.value === String(v)));
+            refreshPlanLine();
+        });
+        seg.appendChild(btn);
+    }
+
+    field.append(label, seg, holder);
+    el.replaceWith(field);
+}
+
+/**
+ * sp-picker у Photoshop не перебудовує закритий trigger після асинхронної
+ * заміни options. Тому збираємо весь control поза DOM і підміняємо його вже
+ * готовим — разом із value, що збігається з одним із пунктів.
+ */
 function fillPicker(id, items, selectedValue) {
-    const picker = $(id);
-    if (!picker) return;
-    const old = picker.querySelector('sp-menu');
-    if (old) old.remove();
+    const old = $(id);
+    if (!old) return null;
+
+    const picker = document.createElement('sp-picker');
+    picker.id = id;
+    for (const attr of ['size', 'class', 'title']) {
+        const value = old.getAttribute(attr);
+        if (value !== null) picker.setAttribute(attr, value);
+    }
+    if (old.disabled) picker.disabled = true;
+    picker.setAttribute('value', selectedValue);
+    const selected = items.find(it => it.value === selectedValue);
+    if (selected) {
+        // UXP іноді лишає trigger порожнім навіть за правильного value.
+        // label/placeholder дають той самий видимий текст як безпечний fallback.
+        picker.setAttribute('label', selected.label);
+        picker.setAttribute('placeholder', selected.label);
+    }
+
     const menu = document.createElement('sp-menu');
     menu.setAttribute('slot', 'options');
     for (const it of items) {
         const item = document.createElement('sp-menu-item');
         item.setAttribute('value', it.value);
         item.textContent = it.label;
-        if (it.value === selectedValue) item.setAttribute('selected', '');
+        if (it.value === selectedValue) {
+            item.setAttribute('selected', '');
+            item.selected = true;
+        }
         menu.appendChild(item);
     }
     picker.appendChild(menu);
+    old.replaceWith(picker);
+    picker.value = selectedValue;
+    return picker;
 }
 
+function bindModelPicker(picker) {
+    if (!picker) return;
+    picker.addEventListener('change', e => {
+        localStorage.setItem(LS.model, e.target.value);
+        refreshPlanLine();
+    });
+}
+
+/**
+ * Заповнює перелік моделей.
+ *
+ * ⚠️ Два await РОЗДІЛЕНІ свідомо. Раніше `getKey` і `p.models` стояли в одному
+ * try — і коли getKey кидав (secureStorage.getItem на відсутньому ключі саме
+ * кидає), ми не доходили до p.models, тобто вбудований резервний список навіть
+ * не питали. Picker лишався БЕЗ ЖОДНОГО пункту, а причина — лише в консолі.
+ */
 async function refreshModels() {
     const p = currentProvider();
+    const refreshSeq = ++modelRefreshSeq;
+
+    let apiKey = null;
+    try { apiKey = await window.aiAuth.getKey(p.keyName); }
+    catch (e) { console.log('[ui] ключ ще не введено — беру перелік без нього'); }
+
     let list = [];
-    try {
-        const apiKey = await window.aiAuth.getKey(p.keyName);
-        list = await p.models(apiKey);
-    } catch (e) {
-        console.warn('[ui] перелік моделей не отримано:', e.message);
+    try { list = (await p.models(apiKey)) || []; }
+    catch (e) { console.warn('[ui] перелік моделей не отримано:', e.message); }
+
+    // Остання лінія: у провайдерів є вбудований список, який не потребує мережі.
+    if (!list.length) {
+        try { list = (await p.models(null)) || []; }
+        catch (e) { console.warn('[ui] і вбудований перелік не вдався:', e.message); }
     }
-    if (!list.length) { setStatus('Не вдалось отримати перелік моделей'); return; }
+    if (!list.length) {
+        setStatus(`Немає жодної моделі для ${p.label} — перевірте ключ і зв'язок`);
+        return;
+    }
+
+    // Поки мережевий перелік завантажувався, користувач міг уже вибрати іншого
+    // провайдера. Старий результат не має права перезаписати новий picker.
+    if (refreshSeq !== modelRefreshSeq || currentProvider().id !== p.id) return;
 
     const saved = localStorage.getItem(LS.model);
     const pick = list.some(m => m.id === saved) ? saved : list[0].id;
     localStorage.setItem(LS.model, pick);
-    fillPicker('model-select', list.map(m => ({ value: m.id, label: m.label })), pick);
+    const picker = fillPicker(
+        'model-select', list.map(m => ({ value: m.id, label: m.label })), pick
+    );
+    bindModelPicker(picker);
 }
 
 /** Гасить елементи, яких провайдер не підтримує, замість тихого ігнорування. */
@@ -266,29 +392,110 @@ async function refreshPlanLine() {
     }
 }
 
-/* ── Облік витрат ──────────────────────────────────────────────────────────── */
+/* ── Постійний журнал витрат ───────────────────────────────────────────────── */
 
-function loadSession() {
-    try { return JSON.parse(localStorage.getItem(LS.session)) || { req: 0, inTok: 0, outTok: 0 }; }
-    catch (e) { return { req: 0, inTok: 0, outTok: 0 }; }
+function loadUsageLedger() {
+    try {
+        const parsed = JSON.parse(localStorage.getItem(LS.usage));
+        // Об'єктова форма лишає простір для майбутньої міграції, але читаємо й
+        // ранню масивну форму, якщо вона встигла потрапити в локальну збірку.
+        const entries = Array.isArray(parsed) ? parsed : parsed?.entries;
+        return usageTracker.prune(entries || []);
+    } catch (e) {
+        console.warn('[usage] журнал пошкоджений — починаю порожній:', e.message);
+        return [];
+    }
 }
-function addUsage(usage) {
-    const s = loadSession();
-    s.req += 1;
-    s.inTok  += Number(usage?.input_tokens)  || 0;
-    s.outTok += Number(usage?.output_tokens) || 0;
-    localStorage.setItem(LS.session, JSON.stringify(s));
-    renderCost(usage);
+
+function saveUsageLedger(entries) {
+    const clean = usageTracker.prune(entries);
+    localStorage.setItem(LS.usage, JSON.stringify({ version: 1, entries: clean }));
+    return clean;
 }
-function renderCost(lastUsage) {
-    const el = $('cost-line');
-    if (!el) return;
-    const s = loadSession();
-    const now = lastUsage
-        ? `цей запит: ${lastUsage.input_tokens ?? '?'} вхід / ${lastUsage.output_tokens ?? '?'} вихід · `
-        : '';
-    el.textContent = `${now}за сесію: ${s.req} запит(ів), ` +
-                     `${s.inTok} вхідних / ${s.outTok} вихідних токенів`;
+
+function recordUsage(meta, usage) {
+    const entries = loadUsageLedger();
+    entries.unshift(usageTracker.createEntry(meta, usage));
+    saveUsageLedger(entries);
+    renderUsage();
+}
+
+function amountWithUnknown(summary) {
+    const amount = `≈${usageTracker.formatUsd(summary.usd)}`;
+    return summary.unknownCost ? `${amount} + ${summary.unknownCost} без оцінки` : amount;
+}
+
+function renderUsage() {
+    const compact = $('cost-line');
+    const summaryEl = $('usage-summary');
+    const listEl = $('usage-list');
+    const stats = usageTracker.summarize(loadUsageLedger());
+
+    if (!stats.last) {
+        if (compact) { compact.textContent = ''; compact.classList.add('hidden'); }
+        if (summaryEl) summaryEl.textContent = 'Запитів іще немає.';
+        if (listEl) listEl.innerHTML = '';
+        setBadge('usage-badge', '');
+        return;
+    }
+
+    const lastAmount = Number.isFinite(stats.last.costUsd)
+        ? `≈${usageTracker.formatUsd(stats.last.costUsd)}` : 'вартість —';
+    if (compact) {
+        compact.textContent = `Останній: ${lastAmount} · сьогодні: ${amountWithUnknown(stats.today)} ` +
+            `(${stats.today.requests}) · 7 днів: ${amountWithUnknown(stats.sevenDays)} ` +
+            `(${stats.sevenDays.requests})`;
+        compact.classList.remove('hidden');
+    }
+    setBadge('usage-badge', `${usageTracker.formatUsd(stats.today.usd)} · ${stats.today.requests}`);
+
+    if (summaryEl) {
+        summaryEl.innerHTML = '';
+        for (const [label, data] of [['Сьогодні', stats.today], ['7 днів', stats.sevenDays], ['Усього в журналі', stats.all]]) {
+            const card = document.createElement('div');
+            card.className = 'usage-card';
+            const name = document.createElement('span');
+            name.className = 'usage-card-label';
+            name.textContent = label;
+            const value = document.createElement('strong');
+            value.textContent = amountWithUnknown(data);
+            const meta = document.createElement('span');
+            meta.className = 'usage-card-meta';
+            meta.textContent = `${data.requests} зап. · ${usageTracker.formatTokens(data.inputTokens)} вх. / ` +
+                `${usageTracker.formatTokens(data.outputTokens)} вих.`;
+            card.appendChild(name); card.appendChild(value); card.appendChild(meta);
+            summaryEl.appendChild(card);
+        }
+    }
+
+    if (listEl) {
+        listEl.innerHTML = '';
+        for (const entry of stats.recent) {
+            const row = document.createElement('div');
+            row.className = 'usage-row';
+            const info = document.createElement('div');
+            info.className = 'usage-info';
+            const main = document.createElement('div');
+            main.className = 'usage-main';
+            main.textContent = `${entry.providerLabel || entry.provider} · ${entry.model}`;
+            const meta = document.createElement('div');
+            meta.className = 'usage-meta';
+            const when = new Date(entry.at);
+            const date = when.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit' });
+            const time = when.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' });
+            const shape = [entry.quality, entry.size, entry.aspectRatio].filter(Boolean).join(' · ');
+            meta.textContent = `${date} ${time}${shape ? ` · ${shape}` : ''} · ` +
+                `${usageTracker.formatTokens(entry.inputTokens)} вх. / ` +
+                `${usageTracker.formatTokens(entry.outputTokens)} вих.`;
+            const amount = document.createElement('div');
+            amount.className = 'usage-amount';
+            amount.textContent = Number.isFinite(entry.costUsd)
+                ? `≈${usageTracker.formatUsd(entry.costUsd)}` : '—';
+            info.appendChild(main); info.appendChild(meta);
+            row.appendChild(info); row.appendChild(amount);
+            listEl.appendChild(row);
+        }
+    }
 }
 
 /* ── Референси ─────────────────────────────────────────────────────────────── */
@@ -309,8 +516,7 @@ function renderRefs() {
             list.appendChild(chip);
         });
     }
-    const badge = $('ref-count');
-    if (badge) badge.textContent = references.length ? String(references.length) : '';
+    setBadge('ref-count', references.length ? String(references.length) : '');
 }
 
 async function pickReferences() {
@@ -357,11 +563,8 @@ function renderPresets() {
         row.append(cb, del);
         list.appendChild(row);
     }
-    const badge = $('preset-count');
-    if (badge) {
-        const n = presetManager.getAll().filter(p => p.active).length;
-        badge.textContent = n ? String(n) : '';
-    }
+    const n = presetManager.getAll().filter(p => p.active).length;
+    setBadge('preset-count', n ? String(n) : '');
 }
 
 function renderHistory() {
@@ -417,8 +620,7 @@ function renderCache() {
             list.appendChild(row);
         }
     }
-    const badge = $('cache-badge');
-    if (badge) badge.textContent = entries.length ? `${entries.length} · ${cache.human()}` : '';
+    setBadge('cache-badge', entries.length ? `${entries.length} · ${cache.human()}` : '');
 }
 
 function buildPrompt() {
@@ -440,11 +642,17 @@ async function insertImage(b64, ctx, target, feather) {
         const channelName = 'AiSel_' + Date.now();
         let haveChannel = false;
         try {
-            await batchPlay([{
-                _obj: 'duplicate',
-                _target: [{ _ref: 'channel', _enum: 'channel', _value: 'selection' }],
-                name: channelName,
-            }], {});
+            // Під час довгої генерації користувач може змінити виділення. Не
+            // застосовуємо чужу маску до старої області: канал зберігаємо лише
+            // коли поточні bounds усе ще збігаються з цільовими.
+            const current = await readSelectionBounds(app.activeDocument).catch(() => null);
+            const currentTarget = current && current.bounds ? geometry.integerTarget(current.bounds) : null;
+            const sameTarget = currentTarget && ['left', 'top', 'right', 'bottom']
+                .every(k => currentTarget[k] === target[k]);
+            if (!sameTarget) throw new Error('активне виділення змінилося — використовую цільовий прямокутник');
+            // Офіційний DOM Selection API (PS 25+). Попередній batchPlay
+            // помилково кодував selection як enum і тому не створював канал.
+            await app.activeDocument.selection.save(channelName);
             haveChannel = true;
         } catch (e) {
             // Немає активного виділення (типовий випадок повтору з кешу) —
@@ -453,7 +661,8 @@ async function insertImage(b64, ctx, target, feather) {
         }
         try {
             const report = await place.placeGeneratedSmartObject(
-                b64, ctx, haveChannel ? channelName : null, { maskFeather: feather });
+                b64, ctx, haveChannel ? channelName : null,
+                { maskFeather: feather, maskBounds: target });
             const r = report.residual || {};
             const el = $('residual-text');
             if (el) {
@@ -468,8 +677,7 @@ async function insertImage(b64, ctx, target, feather) {
         } finally {
             if (haveChannel) {
                 try {
-                    await batchPlay([{ _obj: 'delete',
-                        _target: [{ _ref: 'channel', _name: channelName }] }], {});
+                    await app.activeDocument.channels.getByName(channelName).remove();
                 } catch (e) {}
             }
         }
@@ -617,7 +825,17 @@ async function onGenerate(reuse) {
         const images = (res && res.images) || [];
         if (!images.length) { await core.showAlert('Провайдер не повернув зображень.'); return; }
         showPreview(images[0]);
-        addUsage(res.usage);
+        // Записуємо одразу після успішної відповіді API: гроші вже витрачені,
+        // навіть якщо користувач перемкне документ і вставку доведеться скасувати.
+        recordUsage({
+            provider: provider.id,
+            providerLabel: provider.label,
+            model,
+            quality: s.quality,
+            plan,
+            imageCount: images.length,
+            hasImageInput: !!cap.blob || refBlobs.length > 0,
+        }, res.usage);
 
         /* 5. Вставка */
         if (!app.activeDocument || app.activeDocument.id !== docId) {
@@ -662,7 +880,8 @@ async function onGenerate(reuse) {
 async function initUI() {
     try {
         const list = providers.list();
-        const saved = localStorage.getItem(LS.provider) || list[0].id;
+        const stored = localStorage.getItem(LS.provider);
+        const saved = list.some(p => p.id === stored) ? stored : list[0].id;
         localStorage.setItem(LS.provider, saved);
         fillPicker('provider-select', list.map(p => ({ value: p.id, label: p.label })), saved);
         const picker = $('provider-select');
@@ -677,14 +896,6 @@ async function initUI() {
     } catch (e) { console.error('[ui] провайдери:', e.message); }
 
     try { await refreshModels(); } catch (e) { console.error('[ui] моделі:', e.message); }
-
-    try {
-        const picker = $('model-select');
-        if (picker) picker.addEventListener('change', e => {
-            localStorage.setItem(LS.model, e.target.value);
-            refreshPlanLine();
-        });
-    } catch (e) { console.error('[ui] модель:', e.message); }
 
     try { initQuality(); } catch (e) { console.error('[ui] якість:', e.message); }
     try { applyProviderCapabilities(); } catch (e) { console.error('[ui] можливості:', e.message); }
@@ -703,7 +914,15 @@ async function initUI() {
         };
         bind('prompt-input', LS.prompt, '');
         bind('context-pad', LS.pad, '15');
-        bind('edge-feather', LS.feather, '8');
+        bind('edge-feather', LS.feather, '16');
+        // sp-slider віддає значення подією input, а не лише change
+        for (const id of ['context-pad', 'edge-feather']) {
+            const el = $(id);
+            if (el) el.addEventListener('input', () => {
+                localStorage.setItem(id === 'context-pad' ? LS.pad : LS.feather, String(el.value));
+                schedulePlanLine();
+            });
+        }
         bind('use-layer-only', LS.layerOnly, false, 'checked');
         bind('lossless-input', LS.lossless, true, 'checked');
         bind('transparent-bg', LS.transparent, false, 'checked');
@@ -713,10 +932,16 @@ async function initUI() {
         if (prompt) prompt.addEventListener('input', () => localStorage.setItem(LS.prompt, prompt.value));
     } catch (e) { console.error('[ui] налаштування:', e.message); }
 
+    // Перевірка рендеру — ПІСЛЯ біндингу, бо підміна забирає елемент із DOM.
+    try {
+        ensureNumericControl('context-pad', LS.pad, [0, 5, 10, 15, 25, 40], '%');
+        ensureNumericControl('edge-feather', LS.feather, [0, 8, 16, 32, 64, 128, 256], '');
+    } catch (e) { console.error('[ui] контроли чисел:', e.message); }
+
     try { renderPresets(); } catch (e) { console.error('[ui] пресети:', e.message); }
     try { await historyManager.load(); renderHistory(); } catch (e) { console.error('[ui] історія:', e.message); }
     try { renderCache(); } catch (e) { console.error('[ui] кеш:', e.message); }
-    try { renderRefs(); renderCost(null); } catch (e) {}
+    try { renderRefs(); renderUsage(); } catch (e) { console.error('[ui] статистика:', e.message); }
     try { await refreshPlanLine(); } catch (e) {}
 }
 
@@ -777,6 +1002,16 @@ document.addEventListener('DOMContentLoaded', () => {
         await cache.clear(); renderCache(); setStatus('Кеш очищено');
     });
 
+    const clearUsage = $('clear-usage-btn');
+    if (clearUsage) clearUsage.addEventListener('click', () => {
+        localStorage.removeItem(LS.usage);
+        // Старий безчасовий лічильник більше не читається; очищаємо його разом
+        // із новим журналом, якщо він лишився від попередньої версії.
+        localStorage.removeItem('ai_session_usage');
+        renderUsage();
+        setStatus('Статистику очищено');
+    });
+
     const addPreset = $('add-preset-btn');
     if (addPreset) addPreset.addEventListener('click', () => {
         const name = $('new-preset-name')?.value?.trim();
@@ -789,7 +1024,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Секції, що згортаються
-    for (const [head, body] of [['ref-header', 'ref-body'], ['cache-header', 'cache-body'],
+    for (const [head, body] of [['opts-header', 'opts-body'], ['usage-header', 'usage-body'],
+                                ['ref-header', 'ref-body'], ['cache-header', 'cache-body'],
                                 ['preset-header', 'preset-body'], ['history-header', 'history-body']]) {
         const h = $(head), b = $(body);
         if (h && b) h.addEventListener('click', () => b.classList.toggle('hidden'));

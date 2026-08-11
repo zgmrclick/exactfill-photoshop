@@ -28,6 +28,7 @@ const uxpStorage = require('uxp').storage;
 
 const { withPixels } = require('./place.js');
 const { buildRectMaskPng, encodePng } = require('./png.js');
+const { isolateLayerTree } = require('./layer-tree.js');
 
 /** Режими, які imaging API обслуговує безпечно. Решта — через дублікат. */
 const SAFE_MODES = ['RGBColorMode', 'grayscaleMode', 'GrayscaleMode', 'labColorMode', 'LabColorMode'];
@@ -159,14 +160,12 @@ async function captureViaDuplicate(bounds, useLayerOnly, lossless) {
         dup = await doc.duplicate();
 
         if (useLayerOnly) {
-            // на копії зводимо все, крім активного шару, — дешевше, ніж шукати
-            // відповідність шарів між документами
-            try {
-                const keep = dup.activeLayers[0];
-                for (const l of dup.layers.slice()) {
-                    if (l.id !== keep.id) { try { await l.delete(); } catch (e) {} }
-                }
-            } catch (e) { console.warn('[capture] лише-шар на копії не вдався:', e.message); }
+            // Не видаляємо верхньорівневі шари: активний шар може бути
+            // вкладений у групу. Ізолюємо його гілку видимістю на копії.
+            const keep = dup.activeLayers[0];
+            if (!keep || !isolateLayerTree(dup.layers, keep.id)) {
+                throw new Error('Не вдалося знайти активний шар у копії документа');
+            }
         }
 
         // ЗАПОБІЖНИК. convertMode без _target діє на АКТИВНИЙ документ. Якщо

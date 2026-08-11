@@ -56,6 +56,8 @@ async function models(apiKey) {
             // лише генератори зображень; Imagen свідомо не беремо — вимкнений
             if (!low.includes('-image')) continue;
             if (low.includes('imagen')) continue;
+            const methods = m.supportedGenerationMethods || m.supported_generation_methods;
+            if (Array.isArray(methods) && !methods.includes('generateContent')) continue;
             const isPro = low.includes('-pro-');
             found.push({
                 id: name,
@@ -119,6 +121,11 @@ function normalizeUsage(json) {
         input_tokens: u.promptTokenCount ?? u.prompt_token_count ?? null,
         output_tokens: u.candidatesTokenCount ?? u.candidates_token_count ?? null,
         total_tokens: u.totalTokenCount ?? u.total_token_count ?? null,
+        thought_tokens: u.thoughtsTokenCount ?? u.thoughts_token_count ?? null,
+        // Для вартості важливо відрізнити TEXT від IMAGE: у Gemini вони мають
+        // різні ставки, а candidatesTokenCount містить обидві модальності.
+        input_tokens_details: u.promptTokensDetails ?? u.prompt_tokens_details ?? null,
+        output_tokens_details: u.candidatesTokensDetails ?? u.candidates_tokens_details ?? null,
     };
 }
 
@@ -147,7 +154,8 @@ async function callOnce({ apiKey, model, prompt, imageBlob, references, plan,
         });
     }
 
-    const path = String(model).replace(/^\/+/, '');
+    let path = String(model).replace(/^\/+/, '');
+    if (!path.startsWith('models/')) path = 'models/' + path;
     const json = await request(`${BASE}${path}:generateContent`, {
         method: 'POST',
         headers: authHeaders(apiKey),
@@ -189,7 +197,7 @@ async function generate({ apiKey, model, prompt, imageBlob, references, plan,
         apiKey, model, prompt,
         imageBlob: ignorePixels ? null : imageBlob,
         references, plan, signal,
-    }));
+    }), { signal });
     if (onProgress) onProgress('Готово');
     return res;
 }
