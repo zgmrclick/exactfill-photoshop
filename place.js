@@ -1,12 +1,21 @@
 /* ============================================================================
  *  place.js — центральна функція вставки згенерованого зображення.
  *
- *  Принцип: НЕ передбачаємо, куди Photoshop покладе шар, а КЛАДЕМО, МІРЯЄМО
- *  і ВИСТАВЛЯЄМО рамку в АБСОЛЮТНИХ координатах документа. Жодного відсотка,
- *  жодного центру, жодного putPixels — тому працює в RGB і CMYK, 8/16/32 біт.
+ *  Принцип: НЕ передбачаємо, куди Photoshop покладе шар. КЛАДЕМО → МІРЯЄМО →
+ *  діємо ВІДНОСНО ВИМІРЯНОГО → міряємо знову. Відсоток масштабу тут не є
+ *  джерелом похибки саме тому, що знаменник — щойно прочитана рамка, а не
+ *  припущення. putPixels не задіяний ніде, тому працює в RGB, CMYK, Grayscale,
+ *  8/16/32 біт.
  *  Замінює: main.js:556-661 (getImageDataFromBase64), :779-871
  *  (pasteSingleAsSmartObject), :873-963 (pasteBackImages).
- *  Перевірено node --check + 8 геометричних кейсів (див. verify кроку 4).
+ *
+ *  ВИМІРЯНО в Photoshop 27.5.0 (не з документації — Adobe batchPlay-ID не
+ *  документує). Кроки 4-5 нижче перенесені дослівно у verify/probe6.jsx і
+ *  прогнані: матриця 14 кейсів × RGB 8/16/32, CMYK 8/16, Grayscale 16 ×
+ *  300 і 72 ppi × парне/непарне/дробові межі/1×1/cover/поза канвою/
+ *  відʼємний початок/збільшення — residual 0 всюди, один прохід на кейс.
+ *  Протоколи: verify/probe6.txt (цей алгоритм), verify/probe2-5.txt (як
+ *  до нього дійшли). Метрика в консолі — report.residual, мусить бути нулем.
  * ========================================================================== */
 const { app, core, imaging } = require('photoshop');
 const { batchPlay } = require('photoshop').action;
@@ -63,11 +72,23 @@ async function readSoFrame() {
     const q = Array.prototype.slice.call(more.transform, 0, 8).map(unwrap);
     if (q.some(v => typeof v !== 'number' || !isFinite(v))) return null;
     const xs = [q[0], q[2], q[4], q[6]], ys = [q[1], q[3], q[5], q[7]];
+
+    // Перекіс = transform РОЗБІГАЄТЬСЯ з nonAffineTransform. Сама присутність
+    // ключа ознакою не є: виміряно в PS 27.5 — одразу після чистого place
+    // nonAffineTransform побайтово дублює transform. Перевірка на !!more.
+    // nonAffineTransform давала б хибне попередження на КОЖНІЙ вставці.
+    let skewed = false;
+    if (more.nonAffineTransform && more.nonAffineTransform.length >= 8) {
+        const n = Array.prototype.slice.call(more.nonAffineTransform, 0, 8).map(unwrap);
+        for (let i = 0; i < 8; i++) {
+            if (Math.abs(n[i] - q[i]) > 0.001) { skewed = true; break; }
+        }
+    }
     return {
         left: Math.min.apply(null, xs), right: Math.max.apply(null, xs),
         top: Math.min.apply(null, ys), bottom: Math.max.apply(null, ys),
         size: more.size ? { w: unwrap(more.size.width), h: unwrap(more.size.height) } : null,
-        nonAffine: !!more.nonAffineTransform,
+        skewed,
     };
 }
 
@@ -77,32 +98,72 @@ function readLayerFrameFallback(layer, doc) {
     const b = layer.bounds;
     const L = unwrap(b.left), T = unwrap(b.top), R = unwrap(b.right), B = unwrap(b.bottom);
     const clipped = L <= 0 || T <= 0 || R >= doc.width || B >= doc.height;
-    return { left: L, top: T, right: R, bottom: B, size: null, nonAffine: false, unreliable: clipped };
+    return { left: L, top: T, right: R, bottom: B, size: null, skewed: false, unreliable: clipped };
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+ *  ДВІ ПРИМІТИВИ ГЕОМЕТРІЇ. Обидві виміряні в живому Photoshop 27.5.0
+ *  (див. verify/probe4.txt і verify/probe6.txt): матриця 14 кейсів
+ *  × RGB8/CMYK8/CMYK16/RGB16/RGB32/Gray8 × 300 і 72 ppi дала residual 0.
+ *
+ *  ⚠️ ЧОГО ТУТ БІЛЬШЕ НЕМА І ЧОМУ. Раніше тут стояв `transform` із
+ *  `rectangle`→`quadrilateral` — «абсолютне» виставлення чотирьох кутів.
+ *  Виміряно: ця команда НІЧОГО НЕ РОБИТЬ. Вона не кидає помилки, повертає
+ *  успіх і лишає рамку незмінною — у всіх трьох варіантах одиниць
+ *  (pixelsUnit, distanceUnit, голі double). Найгірший вид відмови: ні
+ *  винятком, ні статичною перевіркою не ловиться, лише виміром after-стану.
+ * ═════════════════════════════════════════════════════════════════════════ */
+
 /**
- * АБСОЛЮТНЕ виставлення рамки: rectangle→quadrilateral. Photoshop натягує
- * прямокутник `rectangle` (поточна рамка SO) на чотири кути `quadrilateral`
- * (ЦІЛЬ у координатах документа). Оскільки ціль — абсолютні цілі числа, а не
- * відсоток від поточного стану, помилка не накопичується і не залежить від
- * парності виділення, від docWidth, від того, чи API віддав більше чи менше.
- * Це і є заміна percentUnit-трансформу з main.js:811-831.
+ * Масштаб у ВІДСОТКАХ від поточної рамки, центр — QCSAverage.
+ * Відсоток тут не є джерелом накопичення похибки, бо `pw` рахується не від
+ * припущення, а від ЩОЙНО ВИМІРЯНОЇ рамки, і після кроку рамка міряється знову.
+ * Photoshop сам прилипає до цілого пікселя: рамка 245.76 при pw=81.7871 %
+ * дала рівно 201 (виміряно в RGB 16-біт 72 ppi).
  */
-async function setSoFrame(cur, dst) {
+async function scaleSo(pw, ph) {
+    // на збільшенні Smoother, на зменшенні Sharper — Photoshop застосовує
+    // інтерполяцію до НАТИВНОГО растру SO (size лишався 1024×1024 навіть при
+    // масштабі 0.0977 %), тому повторні виклики не деградують якість
+    const interp = (pw >= 100 || ph >= 100) ? 'bicubicSmoother' : 'bicubicSharper';
     await batchPlay([{
         _obj: 'transform',
         _target: [{ _ref: 'layer', _enum: 'ordinal', _value: 'targetEnum' }],
         freeTransformCenterState: { _obj: 'quadCenterState', _enum: 'quadCenterState', _value: 'QCSAverage' },
-        rectangle: [PX(cur.left), PX(cur.top), PX(cur.right), PX(cur.bottom)],
-        quadrilateral: [
-            PX(dst.left), PX(dst.top),          // верхній лівий
-            PX(dst.right), PX(dst.top),         // верхній правий
-            PX(dst.right), PX(dst.bottom),      // нижній правий
-            PX(dst.left), PX(dst.bottom),       // нижній лівий
-        ],
-        interpolation: { _enum: 'interpolationType', _value: 'bicubicSharper' },
+        width:  { _unit: 'percentUnit', _value: pw },
+        height: { _unit: 'percentUnit', _value: ph },
+        interpolation: { _enum: 'interpolationType', _value: interp },
         _options: { dialogOptions: 'dontDisplay' },
     }], {});
+}
+
+/**
+ * Зсув шару в ПІКСЕЛЯХ.
+ *
+ * ⚠️ Одиниці критичні. `distanceUnit` (charID `#Rlt`) — це ПУНКТИ (1/72″), і
+ * Photoshop перераховує їх через ppi документа: запит на −567 у 300-ppi
+ * документі давав −2362 = −567 × 300/72. `pixelsUnit` коректний і на 300, і
+ * на 72 ppi — перевірено окремо на обох.
+ *
+ * Дробові дельти не підтримуються: move(0.25, −0.75) фактично дав (0, −1).
+ * Тому округляємо явно — це семантика API, а не втрата точності: після
+ * масштабування рамка вже ціла, тому дельта теж ціла.
+ */
+async function moveSo(dx, dy, layer) {
+    const h = Math.round(dx), v = Math.round(dy);
+    if (h === 0 && v === 0) return;
+    try {
+        await batchPlay([{
+            _obj: 'move',
+            _target: [{ _ref: 'layer', _enum: 'ordinal', _value: 'targetEnum' }],
+            to: { _obj: 'offset', horizontal: PX(h), vertical: PX(v) },
+            _options: { dialogOptions: 'dontDisplay' },
+        }], {});
+    } catch (e) {
+        // резерв на DOM — виміряно як рівноцінний
+        if (layer) await layer.translate(h, v);
+        else throw e;
+    }
 }
 
 /* ── Преференс «Resize Image During Place» ─────────────────────────────────── */
@@ -184,64 +245,76 @@ async function placeGeneratedSmartObject(b64, bounds, channelName) {
         if (!layer) throw new Error('Place не створив шар');
         try { layer.name = `AI ${new Date().toLocaleTimeString()}`; } catch (e) {}
 
-        /* 4. Скидання трансформацій — СТРАХОВКА, не несуча стіна. Якщо ID у цій
-              версії недоступний або нічого не робить — крок 5 все одно доведе. */
+        /* 4. Скидання трансформацій до нативного 1:1. Виміряно: команда дає
+              рівно нативну ширину (4266.667 → 1024) і ПРИ ЦЬОМУ рухає шар —
+              нам байдуже, бо крок 5 міряє після. Користь у тому, що вона
+              нормалізує і PPI-масштабування, і fit-to-canvas, тому відсоток
+              на кроці 5 рахується від нативного растру, а не від обрізаного. */
         try {
             await batchPlay([{ _obj: 'placedLayerResetTransforms',
                 _options: { dialogOptions: 'dontDisplay' } }], {});
         } catch (e) { report.warnings.push('placedLayerResetTransforms недоступний'); }
 
-        /* 5. ЗАМИКАННЯ ЗВОРОТНОГО ЗВ'ЯЗКУ: виміряти → виставити абсолютно →
-              перевірити → добити цілим пікселем. */
-        let cur = await readSoFrame();
-        if (cur && cur.size && (Math.abs(cur.size.w - nat.w) > 1 || Math.abs(cur.size.h - nat.h) > 1)) {
+        /* 5. ЗАМИКАННЯ ЗВОРОТНОГО ЗВ'ЯЗКУ: виміряти → масштаб від виміряного →
+              виміряти → зсув від виміряного → виміряти. Ніде не використовується
+              жодна ПЕРЕДБАЧЕНА величина; кожна дія рахується від щойно
+              прочитаної рамки. Виміряно на матриці 14 кейсів: одного проходу
+              досить у всіх, другий залишений як страховка. */
+        const measure = async () => {
+            let f = await readSoFrame();
+            if (f) {
+                // Гейт правдоподібності: рамка мусить бути ненульова і в межах
+                // ±2 канви. Якщо smartObjectMore колись почне віддавати не
+                // координати документа — виявиться тут, і ми чесно перейдемо
+                // на резервний канал, а не тихо поставимо шар не туди.
+                const w = f.right - f.left, h = f.bottom - f.top;
+                const sane = w > 0.005 && h > 0.005
+                    && f.left > -3 * doc.width && f.right < 4 * doc.width
+                    && f.top > -3 * doc.height && f.bottom < 4 * doc.height;
+                if (!sane) {
+                    report.warnings.push('smartObjectMore.transform неправдоподібний — резерв на layer.bounds');
+                    f = null;
+                }
+            }
+            if (!f) {
+                f = readLayerFrameFallback(layer, doc);
+                if (f.unreliable) report.warnings.push('layer.bounds обрізаний канвою — точність не гарантована');
+            }
+            return f;
+        };
+
+        let cur = await measure();
+        if (cur.size && (Math.abs(cur.size.w - nat.w) > 1 || Math.abs(cur.size.h - nat.h) > 1)) {
             report.warnings.push(`smartObjectMore.size ${cur.size.w}×${cur.size.h} ≠ IHDR ${nat.w}×${nat.h}`);
         }
-        // Гейт правдоподібності: рамка мусить бути ненульова і в межах ±2 канви.
-        // Якщо smartObjectMore віддає координати не в системі документа —
-        // це виявиться тут, і ми чесно перейдемо на резервний канал.
-        if (cur) {
-            const w = cur.right - cur.left, h = cur.bottom - cur.top;
-            const sane = w > 0.5 && h > 0.5
-                && cur.left > -2 * doc.width && cur.right < 3 * doc.width
-                && cur.top > -2 * doc.height && cur.bottom < 3 * doc.height;
-            if (!sane) { report.warnings.push('smartObjectMore.transform неправдоподібний — резерв на layer.bounds'); cur = null; }
-        }
-        if (!cur) {
-            cur = readLayerFrameFallback(layer, doc);
-            if (cur.unreliable) report.warnings.push('layer.bounds обрізаний канвою — точність не гарантована');
-        }
-
-        await setSoFrame(cur, dst);
         report.applied = { left: dst.left, top: dst.top, right: dst.right, bottom: dst.bottom };
 
-        // Один перевірочний read. Оскільки виставлення АБСОЛЮТНЕ, другий прохід
-        // збігається за один крок — це не ітерація відсотками.
-        let after = await readSoFrame();
-        if (after) {
-            const dw = (dst.right - dst.left) - (after.right - after.left);
-            const dh = (dst.bottom - dst.top) - (after.bottom - after.top);
-            if (Math.abs(dw) > 0.01 || Math.abs(dh) > 0.01) {
-                await setSoFrame(after, dst);
-                after = await readSoFrame();
+        const tw = dst.right - dst.left, th = dst.bottom - dst.top;
+        const hit = f => Math.abs(dst.left - f.left) < 0.01 && Math.abs(dst.top - f.top) < 0.01
+                      && Math.abs(tw - (f.right - f.left)) < 0.01
+                      && Math.abs(th - (f.bottom - f.top)) < 0.01;
+
+        for (let pass = 0; pass < 2 && !hit(cur); pass++) {
+            const cw = cur.right - cur.left, ch = cur.bottom - cur.top;
+            if (cw < 0.005 || ch < 0.005) {
+                report.warnings.push(`рамка виродилась (${cw}×${ch}) — масштаб пропущено`);
+                break;
             }
-            if (after) {
-                const dx = dst.left - after.left, dy = dst.top - after.top;
-                if (Math.abs(dx) >= 0.01 || Math.abs(dy) >= 0.01) {
-                    // translate — документовані ПІКСЕЛІ (не відсотки), тому зсув точний
-                    try { await layer.translate(Math.round(dx), Math.round(dy)); } catch (e) {}
-                    after = await readSoFrame();
-                }
-                report.residual = after ? {
-                    dx: +(dst.left - after.left).toFixed(3), dy: +(dst.top - after.top).toFixed(3),
-                    dw: +((dst.right - dst.left) - (after.right - after.left)).toFixed(3),
-                    dh: +((dst.bottom - dst.top) - (after.bottom - after.top)).toFixed(3),
-                } : null;
-                if (after && after.nonAffine) report.warnings.push('SO отримав неафінний трансформ — перевірити порядок кутів');
+            const pw = tw / cw * 100, ph = th / ch * 100;
+            if (Math.abs(pw - 100) > 1e-9 || Math.abs(ph - 100) > 1e-9) {
+                await scaleSo(pw, ph);
+                cur = await measure();
             }
-        } else {
-            report.warnings.push('після трансформу рамку прочитати не вдалось — залишок не виміряний');
+            await moveSo(dst.left - cur.left, dst.top - cur.top, layer);
+            cur = await measure();
         }
+
+        report.residual = {
+            dx: +(dst.left - cur.left).toFixed(3), dy: +(dst.top - cur.top).toFixed(3),
+            dw: +(tw - (cur.right - cur.left)).toFixed(3),
+            dh: +(th - (cur.bottom - cur.top)).toFixed(3),
+        };
+        if (cur.skewed) report.warnings.push('SO має неафінний трансформ (transform ≠ nonAffineTransform)');
 
         /* 6. Маска шару: показуємо рівно виділення. Для cover це ще й обріз
               надлишку; для exact — захист від субпіксельного краю. */

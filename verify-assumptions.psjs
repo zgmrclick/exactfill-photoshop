@@ -1,25 +1,25 @@
 /* ============================================================================
- *  verify-assumptions.psjs — перевірка передумов, на яких стоїть place.js.
+ *  verify-assumptions.psjs — перевірка UXP-боку place.js.
  *
  *  ЯК ЗАПУСТИТИ
  *    Photoshop → File → Scripts → Browse… → вибрати цей файл.
- *    (Можна також покласти його в Presets/Scripts і перезапустити Photoshop —
- *     тоді він з'явиться просто у File → Scripts.)
  *
- *  ЩО РОБИТЬ
- *    Створює власні тестові документи, ставить у них Smart Object і МІРЯЄ, що
- *    саме Photoshop зробив. Документи користувача не чіпає й закриває свої без
- *    збереження. Звіт пише і в консоль, і у файл на Робочому столі.
+ *  ЩО ЦЕ ДАЄ І ЧОГО ТУТ БІЛЬШЕ НЕМА
+ *    Раніше цей скрипт перевіряв усі передумови place.js. Тепер вісім із них
+ *    ВЖЕ ПЕРЕВІРЕНО в Photoshop 27.5.0 через Action Manager (ExtendScript —
+ *    той самий шар, що й batchPlay, лише інший фасад). Звіти лежать у
+ *    scratchpad/psverify/probe*.txt, підсумок — у README.
  *
- *  ЩО ЦЕ ДАЄ
- *    Вісім питань, на які документація Adobe відповіді не дає (batchPlay-ID
- *    там не документовані взагалі). Від відповідей залежить, чи place.js
- *    правильний, і що в ньому правити.
+ *    Лишилися рівно дві речі, яких тим шляхом дістати НЕ можна:
+ *      A. чи batchPlay-обгортка UXP передає ті самі descriptor-и, що
+ *         executeAction (JSON → ActionDescriptor: _unit/_obj/_enum);
+ *      B. модуль imaging — його в ExtendScript немає взагалі.
+ *
+ *    Метрика та сама: residual мусить бути 0 у кожному рядку.
  *
  *  ⚠️ ТЕСТ 8 МОЖЕ ПОВАЛИТИ PHOTOSHOP — це його очікуваний результат
- *     (баг-репорт PS 26.9: imaging.getPixels у CMYK крашить). Він вимкнений.
- *     Щоб увімкнути — поставте RUN_CMYK_CRASH_TEST = true і спершу збережіть
- *     усю роботу. Звіт пишеться на диск ДО цього тесту, тому не загубиться.
+ *     (imaging.getPixels у CMYK). Вимкнений. Щоб увімкнути — RUN_CMYK_CRASH_TEST
+ *     = true і спершу збережіть роботу. Звіт пишеться на диск ДО цього тесту.
  * ========================================================================== */
 
 const RUN_CMYK_CRASH_TEST = false;
@@ -30,13 +30,12 @@ const fs = require('uxp').storage.localFileSystem;
 const formats = require('uxp').storage.formats;
 
 const log = [];
-const say = s => { console.log(s); log.push(s); };
-const verdict = (n, name, ok, detail) => {
-    const mark = ok === true ? 'ОК' : ok === false ? 'НЕ ТАК' : 'НЕ ПЕРЕВІРЕНО';
-    say(`\n[${n}] ${name}\n    ВЕРДИКТ: ${mark}\n    ${detail}`);
-};
+const say = s => { console.log(s); log.push(String(s)); };
+const n4 = v => (v === null || v === undefined) ? 'null' : String(Math.round(v * 10000) / 10000);
+const fmt = f => f ? `L${n4(f.left)} T${n4(f.top)} R${n4(f.right)} B${n4(f.bottom)} ` +
+                     `(${n4(f.right - f.left)}×${n4(f.bottom - f.top)})` : 'null';
 
-/* ── PNG-хелпери (копія з png.js — .psjs не може require наш модуль) ──────── */
+/* ── мінімальний PNG (stored deflate — файл маленький) ─────────────────────── */
 
 const CRC = (() => {
     const t = new Uint32Array(256);
@@ -69,15 +68,13 @@ function chunk(type, data) {
     w32(out, 8 + n, crc32(cb));
     return out;
 }
-/** Простий PNG (stored deflate — тут файли маленькі, стиснення не потрібне). */
+/** RGB із контрастною рамкою 50 px — обрізання по канві видно на око. */
 function makePng(w, h, ppi) {
     const rowBytes = w * 3, filtLen = h * (1 + rowBytes);
     const filt = new Uint8Array(filtLen);
     for (let y = 0; y < h; y++) {
         const o = y * (1 + rowBytes);
         for (let x = 0; x < w; x++) {
-            // помітний вміст: рамка 50 px ПРОЗОРОЮ бути не може (RGB), тому
-            // робимо контрастну рамку — вона ловить обрізання по канві
             const edge = x < 50 || y < 50 || x >= w - 50 || y >= h - 50;
             filt[o + 1 + x*3]     = edge ? 255 : 40;
             filt[o + 1 + x*3 + 1] = edge ? 0   : 90;
@@ -99,7 +96,7 @@ function makePng(w, h, ppi) {
     defl[p++]=(ad>>>24)&255; defl[p++]=(ad>>>16)&255; defl[p++]=(ad>>>8)&255; defl[p]=ad&255;
 
     const ihdr = new Uint8Array(13);
-    w32(ihdr, 0, w); w32(ihdr, 4, h); ihdr[8] = 8; ihdr[9] = 2;   // RGB 8-біт
+    w32(ihdr, 0, w); w32(ihdr, 4, h); ihdr[8] = 8; ihdr[9] = 2;
     const parts = [new Uint8Array([137,80,78,71,13,10,26,10]), chunk('IHDR', ihdr)];
     if (ppi) {
         const d = new Uint8Array(9), ppm = Math.round(ppi * 39.3700787);
@@ -113,42 +110,88 @@ function makePng(w, h, ppi) {
     return png;
 }
 
-/* ── Вимірювання ──────────────────────────────────────────────────────────── */
+/* ── ТОЧНІ КОПІЇ примітивів place.js. Якщо тут residual 0 — batchPlay
+ *    передає descriptor-и так само, як executeAction. ─────────────────────── */
 
+const PX = v => ({ _unit: 'pixelsUnit', _value: v });
 const unwrap = n => (n && typeof n === 'object' && '_value' in n) ? n._value : n;
 
-async function rawLayerDescriptor() {
-    const r = await batchPlay([{
-        _obj: 'get',
-        _target: [
-            { _ref: 'layer', _enum: 'ordinal', _value: 'targetEnum' },
-            { _ref: 'document', _enum: 'ordinal', _value: 'targetEnum' },
-        ],
-    }], {});
-    return r && r[0];
-}
-
-async function measure() {
-    const d = await rawLayerDescriptor();
-    const more = d && d.smartObjectMore;
-    const lay = app.activeDocument.activeLayers[0];
-    const b = lay ? lay.bounds : null;
-    let frame = null;
-    if (more && more.transform && more.transform.length >= 8) {
-        const q = Array.prototype.slice.call(more.transform, 0, 8).map(unwrap);
-        const xs = [q[0],q[2],q[4],q[6]], ys = [q[1],q[3],q[5],q[7]];
-        frame = {
-            left: Math.min.apply(null, xs), right: Math.max.apply(null, xs),
-            top: Math.min.apply(null, ys), bottom: Math.max.apply(null, ys),
-            quad: q,
-        };
+async function readSoFrame() {
+    let res;
+    try {
+        res = await batchPlay([{
+            _obj: 'get',
+            _target: [
+                { _ref: 'layer', _enum: 'ordinal', _value: 'targetEnum' },
+                { _ref: 'document', _enum: 'ordinal', _value: 'targetEnum' },
+            ],
+        }], {});
+    } catch (e) { return null; }
+    const more = res && res[0] && res[0].smartObjectMore;
+    if (!more || !more.transform || more.transform.length < 8) return null;
+    const q = Array.prototype.slice.call(more.transform, 0, 8).map(unwrap);
+    if (q.some(v => typeof v !== 'number' || !isFinite(v))) return null;
+    const xs = [q[0], q[2], q[4], q[6]], ys = [q[1], q[3], q[5], q[7]];
+    let skewed = false;
+    if (more.nonAffineTransform && more.nonAffineTransform.length >= 8) {
+        const n = Array.prototype.slice.call(more.nonAffineTransform, 0, 8).map(unwrap);
+        for (let i = 0; i < 8; i++) if (Math.abs(n[i] - q[i]) > 0.001) { skewed = true; break; }
     }
     return {
-        more, frame,
-        size: more && more.size ? { w: unwrap(more.size.width), h: unwrap(more.size.height) } : null,
-        bounds: b ? { left: unwrap(b.left), top: unwrap(b.top),
-                      right: unwrap(b.right), bottom: unwrap(b.bottom) } : null,
+        left: Math.min.apply(null, xs), right: Math.max.apply(null, xs),
+        top: Math.min.apply(null, ys), bottom: Math.max.apply(null, ys),
+        size: more.size ? { w: unwrap(more.size.width), h: unwrap(more.size.height) } : null,
+        skewed,
     };
+}
+async function scaleSo(pw, ph) {
+    const interp = (pw >= 100 || ph >= 100) ? 'bicubicSmoother' : 'bicubicSharper';
+    await batchPlay([{
+        _obj: 'transform',
+        _target: [{ _ref: 'layer', _enum: 'ordinal', _value: 'targetEnum' }],
+        freeTransformCenterState: { _obj: 'quadCenterState', _enum: 'quadCenterState', _value: 'QCSAverage' },
+        width:  { _unit: 'percentUnit', _value: pw },
+        height: { _unit: 'percentUnit', _value: ph },
+        interpolation: { _enum: 'interpolationType', _value: interp },
+        _options: { dialogOptions: 'dontDisplay' },
+    }], {});
+}
+async function moveSo(dx, dy) {
+    const h = Math.round(dx), v = Math.round(dy);
+    if (h === 0 && v === 0) return;
+    await batchPlay([{
+        _obj: 'move',
+        _target: [{ _ref: 'layer', _enum: 'ordinal', _value: 'targetEnum' }],
+        to: { _obj: 'offset', horizontal: PX(h), vertical: PX(v) },
+        _options: { dialogOptions: 'dontDisplay' },
+    }], {});
+}
+async function placeFile(file) {
+    const token = fs.createSessionToken(file);
+    await batchPlay([{
+        _obj: 'placeEvent',
+        null: { _path: token, _kind: 'local' },
+        linked: false,
+        freeTransformCenterState: { _obj: 'quadCenterState', _enum: 'quadCenterState', _value: 'QCSAverage' },
+        offset: { _obj: 'offset', horizontal: PX(0), vertical: PX(0) },
+        _options: { dialogOptions: 'dontDisplay' },
+    }], {});
+}
+
+/* геометрія — та сама арифметика, що в geometry.js */
+function integerTarget(b) {
+    const left = Math.round(b.left), top = Math.round(b.top);
+    const right = Math.round(b.right), bottom = Math.round(b.bottom);
+    return { left, top, right, bottom, w: right - left, h: bottom - top };
+}
+function planFrame(t, nat) {
+    const aspectErr = Math.abs((t.w / t.h) / (nat.w / nat.h) - 1);
+    if (aspectErr <= 0.005) return { mode: 'exact', left: t.left, top: t.top, right: t.right, bottom: t.bottom };
+    const s = Math.max(t.w / nat.w, t.h / nat.h);
+    const fw = Math.round(nat.w * s), fh = Math.round(nat.h * s);
+    const left = t.left + Math.round((t.w - fw) / 2);
+    const top  = t.top  + Math.round((t.h - fh) / 2);
+    return { mode: 'cover', left, top, right: left + fw, bottom: top + fh };
 }
 
 async function writePng(name, bytes) {
@@ -158,201 +201,135 @@ async function writePng(name, bytes) {
                   { format: formats.binary });
     return f;
 }
-
-async function placeFile(file) {
-    const token = fs.createSessionToken(file);
-    await batchPlay([{
-        _obj: 'placeEvent',
-        null: { _path: token, _kind: 'local' },
-        linked: false,
-        freeTransformCenterState: { _obj: 'quadCenterState', _enum: 'quadCenterState', _value: 'QCSAverage' },
-        _options: { dialogOptions: 'dontDisplay' },
-    }], {});
+async function getPref() {
+    try {
+        const r = await batchPlay([{ _obj: 'get', _target: [
+            { _ref: 'property', _property: 'generalPreferences' },
+            { _ref: 'application', _enum: 'ordinal', _value: 'targetEnum' }] }], {});
+        const v = r && r[0] && r[0].generalPreferences && r[0].generalPreferences.resizePastePlace;
+        return typeof v === 'boolean' ? v : null;
+    } catch (e) { return null; }
+}
+async function setPref(value) {
+    try {
+        await batchPlay([{ _obj: 'set', _target: [
+            { _ref: 'property', _property: 'generalPreferences' },
+            { _ref: 'application', _enum: 'ordinal', _value: 'targetEnum' }],
+            to: { _obj: 'generalPreferences', resizePastePlace: value } }], {});
+    } catch (e) {}
 }
 
-async function newDoc(name, mode, depth, w, h, res) {
-    return app.documents.add({
-        name, width: w, height: h, resolution: res,
-        mode, fill: constants.DocumentFill.WHITE, depth,
-    });
-}
-
-/* ── Тести ────────────────────────────────────────────────────────────────── */
+/* ── прогін ───────────────────────────────────────────────────────────────── */
 
 async function run() {
     const M = constants.NewDocumentMode;
     const D = constants.BitsPerChannelType;
 
-    say('=== Перевірка передумов place.js ===');
+    say('=== A. batchPlay-паритет: чи UXP передає ті самі descriptor-и ===');
     say(`Photoshop ${app.version}`);
-    const dirty = app.documents.filter(d => d.saved === false).length;
-    if (dirty) say(`⚠️ Відкрито ${dirty} незбережених документів — цей скрипт їх не чіпає, ` +
-                   'але перед тестом 8 (якщо ввімкнете) збережіть роботу.');
+    const open = app.documents.length;
+    say(`відкритих документів: ${open} — скрипт їх не чіпає`);
 
-    const png1024_nophys = makePng(1024, 1024, 0);
-    const png1024_300    = makePng(1024, 1024, 300);
-    const fNoPhys = await writePng('vt_nophys.png', png1024_nophys);
-    const f300    = await writePng('vt_300.png',    png1024_300);
+    const fileSq = await writePng('vt_sq.png',  makePng(1024, 1024, 300));
+    const fileWd = await writePng('vt_wd.png',  makePng(1000, 600, 300));
 
-    let doc = null;
+    const prefWas = await getPref();
+    if (prefWas === true) await setPref(false);
 
-    /* 1 + 2 + 3: координати, quad-трансформ, resetTransforms — у RGB 300ppi */
-    try {
-        doc = await newDoc('VT_RGB8', M.RGB, D.EIGHT, 2000, 1500, 300);
-        await placeFile(f300);
+    const CASES = [
+        { tag: 'RGB8 300  парне 200×200',   mode: M.RGB,  depth: D.EIGHT,   w: 2000, h: 1500, res: 300, file: fileSq, nat: {w:1024,h:1024}, b: {left:400, top:300, right:600, bottom:500} },
+        { tag: 'RGB8 300  НЕПАРНЕ 201×201', mode: M.RGB,  depth: D.EIGHT,   w: 2000, h: 1500, res: 300, file: fileSq, nat: {w:1024,h:1024}, b: {left:333, top:277, right:534, bottom:478} },
+        { tag: 'RGB8 300  дробові межі',    mode: M.RGB,  depth: D.EIGHT,   w: 2000, h: 1500, res: 300, file: fileSq, nat: {w:1024,h:1024}, b: {left:332.6, top:276.4, right:533.5, bottom:477.5} },
+        { tag: 'RGB8 300  cover 400×400',   mode: M.RGB,  depth: D.EIGHT,   w: 2000, h: 1500, res: 300, file: fileWd, nat: {w:1000,h:600},  b: {left:700, top:500, right:1100, bottom:900} },
+        { tag: 'RGB8 300  поза канвою',     mode: M.RGB,  depth: D.EIGHT,   w: 2000, h: 1500, res: 300, file: fileSq, nat: {w:1024,h:1024}, b: {left:1850, top:1400, right:2150, bottom:1700} },
+        { tag: 'CMYK8 300 НЕПАРНЕ',         mode: M.CMYK, depth: D.EIGHT,   w: 2000, h: 1500, res: 300, file: fileSq, nat: {w:1024,h:1024}, b: {left:333, top:277, right:534, bottom:478} },
+        { tag: 'CMYK16 300 НЕПАРНЕ',        mode: M.CMYK, depth: D.SIXTEEN, w: 2000, h: 1500, res: 300, file: fileSq, nat: {w:1024,h:1024}, b: {left:333, top:277, right:534, bottom:478} },
+        { tag: 'RGB16 72  НЕПАРНЕ',         mode: M.RGB,  depth: D.SIXTEEN, w: 800,  h: 600,  res: 72,  file: fileSq, nat: {w:1024,h:1024}, b: {left:251, top:131, right:452, bottom:332} },
+    ];
 
-        const m0 = await measure();
-        say('\n--- сирий smartObjectMore (скорочено) ---');
-        say('  size: ' + JSON.stringify(m0.more && m0.more.size));
-        say('  transform: ' + JSON.stringify(m0.more && m0.more.transform));
-        say('  nonAffine: ' + JSON.stringify(m0.more && m0.more.nonAffineTransform));
-        say('  layer.bounds: ' + JSON.stringify(m0.bounds));
-
-        const docCentered = m0.frame &&
-            Math.abs((m0.frame.left + m0.frame.right) / 2 - 1000) < 30 &&
-            Math.abs((m0.frame.top + m0.frame.bottom) / 2 - 750) < 30;
-        verdict(1, 'Координатна система smartObjectMore.transform',
-            m0.frame ? docCentered : null,
-            m0.frame
-              ? `рамка = ${JSON.stringify({left:m0.frame.left,top:m0.frame.top,right:m0.frame.right,bottom:m0.frame.bottom})}. ` +
-                (docCentered
-                  ? 'Центр збігається з центром полотна (1000,750) → координати В СИСТЕМІ ДОКУМЕНТА, як і припускає place.js.'
-                  : 'Центр НЕ там, де центр полотна → координати НЕ в системі документа. ' +
-                    'У place.js доведеться перейти на layer.bounds або конвертувати систему.')
-              : 'transform недоступний або не 8 чисел → place.js піде на резервний канал layer.bounds.');
-
-        // 3. resetTransforms — до і після
-        const before = m0.frame ? { ...m0.frame } : null;
-        let resetOk = null, resetDetail = 'команда недоступна';
+    let good = 0, converted = [];
+    for (const c of CASES) {
+        let doc = null;
         try {
-            await batchPlay([{ _obj: 'placedLayerResetTransforms',
-                _options: { dialogOptions: 'dontDisplay' } }], {});
-            const m1 = await measure();
-            if (before && m1.frame) {
-                const wBefore = before.right - before.left, wAfter = m1.frame.right - m1.frame.left;
-                const moved = Math.abs(m1.frame.left - before.left) > 0.5 ||
-                              Math.abs(m1.frame.top - before.top) > 0.5;
-                resetOk = Math.abs(wAfter - 1024) < 2;
-                resetDetail = `ширина ${wBefore} → ${wAfter} (натив 1024). ` +
-                    (resetOk ? 'Скидає масштаб до нативного 1:1. ' : 'НЕ дає нативний розмір. ') +
-                    (moved ? 'ПОЗИЦІЮ ЗМІНЮЄ (place.js це переживає — він міряє після).'
-                           : 'позицію не змінює.');
-            }
-        } catch (e) { resetDetail = 'кинула помилку: ' + e.message; }
-        verdict(3, 'placedLayerResetTransforms', resetOk, resetDetail);
+            doc = await app.documents.add({ name: 'VT', width: c.w, height: c.h, resolution: c.res,
+                mode: c.mode, fill: constants.DocumentFill.WHITE, depth: c.depth });
+            const modeBefore = String(doc.mode), bpcBefore = doc.bitsPerChannel;
 
-        // 2. rectangle → quadrilateral: виставити рамку в 100,100..500,400
-        let quadOk = null, quadDetail = 'не вдалось виміряти';
-        const cur = (await measure()).frame;
-        if (cur) {
-            const dst = { left: 100, top: 100, right: 500, bottom: 400 };
-            const PX = v => ({ _unit: 'pixelsUnit', _value: v });
-            try {
-                await batchPlay([{
-                    _obj: 'transform',
-                    _target: [{ _ref: 'layer', _enum: 'ordinal', _value: 'targetEnum' }],
-                    freeTransformCenterState: { _obj: 'quadCenterState', _enum: 'quadCenterState', _value: 'QCSAverage' },
-                    rectangle: [PX(cur.left), PX(cur.top), PX(cur.right), PX(cur.bottom)],
-                    quadrilateral: [PX(dst.left), PX(dst.top), PX(dst.right), PX(dst.top),
-                                    PX(dst.right), PX(dst.bottom), PX(dst.left), PX(dst.bottom)],
-                    _options: { dialogOptions: 'dontDisplay' },
-                }], {});
-                const m2 = await measure();
-                if (m2.frame) {
-                    const dx = m2.frame.left - dst.left, dy = m2.frame.top - dst.top;
-                    const dw = (m2.frame.right - m2.frame.left) - 400;
-                    const dh = (m2.frame.bottom - m2.frame.top) - 300;
-                    quadOk = Math.abs(dx) < 1 && Math.abs(dy) < 1 && Math.abs(dw) < 1 && Math.abs(dh) < 1;
-                    quadDetail = `ціль 100,100,400×300 → отримано ` +
-                        `${m2.frame.left},${m2.frame.top},${m2.frame.right-m2.frame.left}×${m2.frame.bottom-m2.frame.top} ` +
-                        `(Δ ${dx},${dy},${dw},${dh}). ` +
-                        (m2.more && m2.more.nonAffineTransform ? 'УВАГА: неафінний трансформ — порядок кутів інший! ' : '') +
-                        (quadOk ? 'Абсолютне виставлення рамки працює — це несуча ідея place.js.'
-                                : 'Рамка стала не туди — у place.js потрібен інший порядок кутів або інші одиниці.');
+            const target = integerTarget(c.b);
+            const dst = planFrame(target, c.nat);
+            const tw = dst.right - dst.left, th = dst.bottom - dst.top;
+
+            await placeFile(c.file);
+            try { await batchPlay([{ _obj: 'placedLayerResetTransforms',
+                _options: { dialogOptions: 'dontDisplay' } }], {}); } catch (e) {}
+
+            let cur = await readSoFrame();
+            const lines = [`після reset ${fmt(cur)}`];
+            const hit = f => f && Math.abs(dst.left - f.left) < 0.01 && Math.abs(dst.top - f.top) < 0.01
+                          && Math.abs(tw - (f.right - f.left)) < 0.01
+                          && Math.abs(th - (f.bottom - f.top)) < 0.01;
+            let passes = 0;
+            for (let pass = 0; pass < 2 && cur && !hit(cur); pass++) {
+                passes++;
+                const cw = cur.right - cur.left, ch = cur.bottom - cur.top;
+                if (cw < 0.005 || ch < 0.005) break;
+                const pw = tw / cw * 100, ph = th / ch * 100;
+                if (Math.abs(pw - 100) > 1e-9 || Math.abs(ph - 100) > 1e-9) {
+                    await scaleSo(pw, ph);
+                    cur = await readSoFrame();
+                    lines.push(`масштаб ${fmt(cur)}  pw=${n4(pw)}% ph=${n4(ph)}%`);
                 }
-            } catch (e) { quadDetail = 'transform кинув помилку: ' + e.message; }
-        }
-        verdict(2, 'transform rectangle→quadrilateral як масиви', quadOk, quadDetail);
-
-        // 6. pHYs проти без pHYs — у тому ж 300ppi документі
-        await placeFile(fNoPhys);
-        const mNo = await measure();
-        const wNo = mNo.frame ? Math.round(mNo.frame.right - mNo.frame.left) : null;
-        verdict(6, 'pHYs усуває PPI-масштабування',
-            wNo === null ? null : wNo !== 1024,
-            `PNG 1024 px БЕЗ pHYs у 300-ppi документі → ширина ${wNo} px. ` +
-            (wNo === 1024
-              ? 'Масштабування НЕ відбулось — тобто pHYs не потрібен (але й не шкодить).'
-              : `Масштабування є (${wNo}/1024 = ${wNo ? (wNo/1024).toFixed(2) : '?'}×), ` +
-                'а з pHYs вище ширина була 1024 → pHYs справді усуває його. Це підтверджує setPngResolution.'));
-
-        // 4. resizePastePlace
-        let prefOk = null, prefDetail = '';
-        const PREF = [{ _ref: 'property', _property: 'generalPreferences' },
-                      { _ref: 'application', _enum: 'ordinal', _value: 'targetEnum' }];
-        try {
-            const r0 = await batchPlay([{ _obj: 'get', _target: PREF }], {});
-            const v0 = r0 && r0[0] && r0[0].generalPreferences &&
-                       r0[0].generalPreferences.resizePastePlace;
-            if (typeof v0 === 'boolean') {
-                await batchPlay([{ _obj: 'set', _target: PREF,
-                    to: { _obj: 'generalPreferences', resizePastePlace: !v0 } }], {});
-                const r1 = await batchPlay([{ _obj: 'get', _target: PREF }], {});
-                const v1 = r1[0].generalPreferences.resizePastePlace;
-                await batchPlay([{ _obj: 'set', _target: PREF,
-                    to: { _obj: 'generalPreferences', resizePastePlace: v0 } }], {});
-                prefOk = v1 === !v0;
-                prefDetail = `читається (${v0}), запис ${prefOk ? 'працює' : 'НЕ працює'}, значення відновлено.`;
-            } else {
-                prefDetail = 'поле resizePastePlace у generalPreferences відсутнє.';
+                await moveSo(dst.left - cur.left, dst.top - cur.top);
+                cur = await readSoFrame();
+                lines.push(`зсув    ${fmt(cur)}`);
             }
-        } catch (e) { prefDetail = 'помилка: ' + e.message; }
-        verdict(4, 'resizePastePlace через generalPreferences', prefOk, prefDetail);
-
-        await doc.closeWithoutSaving(); doc = null;
-    } catch (e) {
-        say('\n!!! Блок 1-4,6 обірвався: ' + e.message);
-        if (doc) { try { await doc.closeWithoutSaving(); } catch (e2) {} doc = null; }
-    }
-
-    /* 5. place у CMYK і 16-біт — чи конвертує документ */
-    for (const t of [
-        { name: 'VT_CMYK8', mode: M.CMYK, depth: D.EIGHT,  w: 2000, h: 1500, res: 300 },
-        { name: 'VT_RGB16', mode: M.RGB,  depth: D.SIXTEEN, w: 800,  h: 600,  res: 72 },
-    ]) {
-        let d2 = null;
-        try {
-            d2 = await newDoc(t.name, t.mode, t.depth, t.w, t.h, t.res);
-            const modeBefore = String(d2.mode), bpcBefore = d2.bitsPerChannel;
-            const histBefore = d2.historyStates.length;
-            await placeFile(f300);
             const modeAfter = String(app.activeDocument.mode);
             const bpcAfter = app.activeDocument.bitsPerChannel;
-            const names = app.activeDocument.historyStates
-                .slice(histBefore).map(h => h.name).join(', ');
-            const converted = modeBefore !== modeAfter || bpcBefore !== bpcAfter ||
-                              /convert/i.test(names);
-            const m = await measure();
-            verdict(5, `place у ${t.name} не конвертує документ`, !converted,
-                `режим ${modeBefore}→${modeAfter}, біт ${bpcBefore}→${bpcAfter}, ` +
-                `нові кроки історії: [${names}]. ` +
-                (converted
-                  ? 'КОНВЕРТУВАВ — несуча передумова place.js хибна, потрібен інший шлях вставки!'
-                  : 'Не конвертував — Smart Object можна ставити просто так, ' +
-                    'документ лишається як був. Це і є головна перемога нової архітектури.') +
-                (m.frame ? ` Рамка: ${Math.round(m.frame.right-m.frame.left)}×${Math.round(m.frame.bottom-m.frame.top)} px.` : ''));
-            await d2.closeWithoutSaving(); d2 = null;
+            const conv = modeBefore !== modeAfter || bpcBefore !== bpcAfter;
+            if (conv) converted.push(c.tag);
+
+            const res = cur ? {
+                dx: dst.left - cur.left, dy: dst.top - cur.top,
+                dw: tw - (cur.right - cur.left), dh: th - (cur.bottom - cur.top),
+            } : null;
+            const ok = res && Math.abs(res.dx) < 0.01 && Math.abs(res.dy) < 0.01
+                           && Math.abs(res.dw) < 0.01 && Math.abs(res.dh) < 0.01;
+            if (ok) good++;
+
+            say('');
+            say(`  ${c.tag}`);
+            say(`      ціль [${dst.mode}] ${fmt(dst)}`);
+            for (const l of lines) say(`      ${l}`);
+            say(`      residual ${res ? `dx=${n4(res.dx)} dy=${n4(res.dy)} dw=${n4(res.dw)} dh=${n4(res.dh)}` : 'не виміряний'}` +
+                `  => ${ok ? 'ТОЧНО' : 'ЗСУВ'} | проходів ${passes}` +
+                ` | нативний растр ${cur && cur.size ? `${n4(cur.size.w)}×${n4(cur.size.h)}` : '?'}` +
+                ` | перекіс ${cur ? cur.skewed : '?'}` +
+                ` | документ ${modeAfter}/${bpcAfter}${conv ? ' ← СКОНВЕРТОВАНО!' : ''}`);
+
+            await doc.closeWithoutSaving(); doc = null;
         } catch (e) {
-            verdict(5, `place у ${t.name}`, null, 'помилка: ' + e.message);
-            if (d2) { try { await d2.closeWithoutSaving(); } catch (e2) {} }
+            say(`  ${c.tag} — ПОМИЛКА: ${e.message}`);
+            if (doc) { try { await doc.closeWithoutSaving(); } catch (e2) {} }
         }
     }
+    if (prefWas === true) await setPref(true);
 
-    /* 7. componentSize:8 з 16-бітного документа */
+    say('');
+    say(`ПІДСУМОК A: ${good}/${CASES.length} точно` +
+        (converted.length ? `; СКОНВЕРТОВАНО: ${converted.join(', ')}` : '; жоден документ не сконвертовано'));
+    if (good < CASES.length) {
+        say('  ⚠️ Якщо через ExtendScript ті самі кейси давали 0 (див. probe6.txt), а тут ні —');
+        say('     різниця саме в обгортці batchPlay: перевірте _unit/_obj у scaleSo/moveSo.');
+    }
+
+    /* ── B. imaging: чого з ExtendScript не видно ───────────────────────── */
+    say('');
+    say('=== B. imaging — модуль, якого в ExtendScript немає ===');
+
     let d3 = null;
     try {
-        d3 = await newDoc('VT_RGB16b', M.RGB, D.SIXTEEN, 400, 300, 72);
-        let ok = null, detail = '';
+        d3 = await app.documents.add({ name: 'VT16', width: 400, height: 300, resolution: 72,
+            mode: M.RGB, fill: constants.DocumentFill.WHITE, depth: D.SIXTEEN });
         try {
             const px = await imaging.getPixels({
                 sourceBounds: { left: 0, top: 0, right: 64, bottom: 64 },
@@ -360,90 +337,75 @@ async function run() {
                 componentSize: 8, applyAlpha: false,
             });
             const data = await px.imageData.getData();
-            detail = `повернув ${px.imageData.components} комп., ` +
-                     `componentSize ${px.imageData.componentSize}, ${data.length} байтів. ` +
-                     'Прямий шлях capture.js працює на 16 біт — дублікат не потрібен.';
-            ok = true;
+            say(`  [7] getPixels componentSize:8 з 16-бітного документа: ПРАЦЮЄ — ` +
+                `${px.imageData.components} комп., componentSize ${px.imageData.componentSize}, ` +
+                `${data.length} байтів. Прямий шлях capture.js достатній, дублікат не потрібен.`);
             px.imageData.dispose();
         } catch (e) {
-            ok = false;
-            detail = `кинув «${e.message}». Це відома регресія з PS 26.3. ` +
-                     'capture.js це переживає — він тихо перейде на шлях через дублікат.';
+            say(`  [7] getPixels componentSize:8 з 16 біт: КИДАЄ «${e.message}» — ` +
+                'відома регресія з PS 26.3. capture.js це переживає: тихо йде через дублікат.');
         }
-        verdict(7, 'getPixels componentSize:8 з 16-бітного документа', ok, detail);
         await d3.closeWithoutSaving(); d3 = null;
     } catch (e) {
-        verdict(7, 'getPixels componentSize:8 з 16 біт', null, 'помилка: ' + e.message);
+        say(`  [7] не вдалось перевірити: ${e.message}`);
         if (d3) { try { await d3.closeWithoutSaving(); } catch (e2) {} }
     }
 
-    /* Звіт на диск ДО небезпечного тесту */
+    /* звіт на диск ДО небезпечного тесту */
     let reportPath = '(не збережено)';
     try {
-        const desk = await fs.getFolder({ initialDomain: require('uxp').storage.domains.userDesktop })
-            .catch(() => null);
-        const folder = desk || await fs.getTemporaryFolder();
-        const rf = await folder.createFile(`ai-image-ps-verify-${Date.now()}.txt`, { overwrite: true });
+        const tmp = await fs.getTemporaryFolder();
+        const rf = await tmp.createFile(`ai-image-ps-verify-${Date.now()}.txt`, { overwrite: true });
         await rf.write(log.join('\n'));
         reportPath = rf.nativePath;
-    } catch (e) {
-        try {
-            const tmp = await fs.getTemporaryFolder();
-            const rf = await tmp.createFile(`ai-image-ps-verify-${Date.now()}.txt`, { overwrite: true });
-            await rf.write(log.join('\n'));
-            reportPath = rf.nativePath;
-        } catch (e2) { reportPath = 'не вдалось: ' + e2.message; }
-    }
-    say(`\nЗвіт збережено: ${reportPath}`);
+    } catch (e) { reportPath = 'не вдалось: ' + e.message; }
+    say('');
+    say(`Звіт: ${reportPath}`);
 
-    /* 8. НЕБЕЗПЕЧНИЙ: getPixels у CMYK */
     if (RUN_CMYK_CRASH_TEST) {
-        say('\n⚠️ Тест 8: getPixels у CMYK. Photoshop може впасти — це очікуваний результат.');
+        say('');
+        say('⚠️ [8] getPixels у CMYK — Photoshop може впасти, це очікуваний результат.');
         let d4 = null;
         try {
-            d4 = await newDoc('VT_CMYK_CRASH', constants.NewDocumentMode.CMYK,
-                              constants.BitsPerChannelType.EIGHT, 200, 200, 72);
+            d4 = await app.documents.add({ name: 'VTCMYK', width: 200, height: 200, resolution: 72,
+                mode: M.CMYK, fill: constants.DocumentFill.WHITE, depth: D.EIGHT });
             const px = await imaging.getPixels({
                 sourceBounds: { left: 0, top: 0, right: 16, bottom: 16 },
                 colorSpace: 'RGB', colorProfile: 'sRGB IEC61966-2.1',
                 componentSize: 8, applyAlpha: false,
             });
             const data = await px.imageData.getData();
-            verdict(8, 'getPixels({colorSpace:RGB}) у CMYK', true,
-                `НЕ впав, повернув ${data.length} байтів — CMYK можна читати напряму, ` +
-                'і шлях через дублікат у capture.js стає непотрібним.');
+            say(`  [8] НЕ впав, ${data.length} байтів — CMYK можна читати напряму, ` +
+                'дублікат у capture.js стає непотрібним.');
             px.imageData.dispose();
             await d4.closeWithoutSaving();
         } catch (e) {
-            verdict(8, 'getPixels({colorSpace:RGB}) у CMYK', false,
-                `кинув «${e.message}» — принаймні gracefully. Дублікат у capture.js потрібен.`);
+            say(`  [8] кинув «${e.message}» — принаймні gracefully. Дублікат потрібен.`);
             if (d4) { try { await d4.closeWithoutSaving(); } catch (e2) {} }
         }
     } else {
-        verdict(8, 'getPixels у CMYK (тест вимкнено)', null,
-            'RUN_CMYK_CRASH_TEST = false. capture.js CMYK через imaging не читає взагалі, ' +
-            'тому для роботи плагіна це питання не критичне.');
+        say('  [8] getPixels у CMYK — тест вимкнено (RUN_CMYK_CRASH_TEST = false).');
+        say('      capture.js CMYK через imaging не читає взагалі, тому для роботи це не критично.');
     }
 
-    /* прибирання */
-    try { await fNoPhys.delete(); } catch (e) {}
-    try { await f300.delete(); } catch (e) {}
+    try { await fileSq.delete(); } catch (e) {}
+    try { await fileWd.delete(); } catch (e) {}
 
-    say('\n=== Кінець ===');
-    // перезапис звіту з фінальними рядками
+    say('');
+    say(`відкритих документів на виході: ${app.documents.length} (було ${open})`);
+    say('=== кінець ===');
+
     try {
         const tmp = await fs.getTemporaryFolder();
         const rf = await tmp.createFile('ai-image-ps-verify-final.txt', { overwrite: true });
         await rf.write(log.join('\n'));
-        say('Фінальний звіт: ' + rf.nativePath);
     } catch (e) {}
 
-    await core.showAlert('Перевірку завершено.\n\nЗвіт: ' + reportPath +
-        '\n\nДеталі — у консолі плагіна (Plugins → Development → Show Console) ' +
-        'або у файлі звіту.');
+    await core.showAlert(`Перевірка UXP-боку завершена.\n\nA: ${good}/${CASES.length} точно` +
+        `\n\nЗвіт: ${reportPath}\n\nДеталі — Plugins → Development → Show Console.`);
 }
 
-core.executeAsModal(run, { commandName: 'Перевірка передумов place.js' })
+core.executeAsModal(run, { commandName: 'Перевірка UXP-боку place.js' })
     .catch(e => {
         console.error(e);
         core.showAlert('Перевірка обірвалась: ' + (e && e.message ? e.message : e));
