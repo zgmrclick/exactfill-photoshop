@@ -10,7 +10,7 @@ set -e
 DEST="/Applications/Adobe Photoshop 2026/Plug-ins/AiImagePS"
 SRC="$(cd "$(dirname "$0")" && pwd)"
 EXCL=(--exclude '.git' --exclude 'test' --exclude 'CONTRACTS.md'
-      --exclude 'deploy.sh' --exclude '.gitignore' --exclude 'node_modules')
+      --exclude 'deploy.sh' --exclude '.gitignore' --exclude 'node_modules' --exclude 'verify' --exclude '.DS_Store')
 
 if [ -d "$DEST" ] && [ -w "$DEST" ]; then
     rsync -a --delete "${EXCL[@]}" "$SRC/" "$DEST/"
