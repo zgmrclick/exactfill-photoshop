@@ -1,0 +1,7 @@
+{
+  "name": "ai-image-ps",
+  "version": "1.0.0",
+  "description": "Один UXP-плагін Photoshop: виділення + промпт -> Smart Object точно на місці. OpenAI та Google Gemini.",
+  "main": "index.html",
+  "private": true
+}

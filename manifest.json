@@ -1,0 +1,51 @@
+{
+  "id": "ai-image-ps",
+  "name": "AI Image",
+  "version": "1.0.0",
+  "main": "index.html",
+  "host": {
+    "app": "PS",
+    "minVersion": "25.0.0"
+  },
+  "manifestVersion": 5,
+  "requiredPermissions": {
+    "localFileSystem": "request",
+    "network": {
+      "domains": [
+        "https://api.openai.com",
+        "https://generativelanguage.googleapis.com"
+      ]
+    }
+  },
+  "entrypoints": [
+    {
+      "type": "panel",
+      "id": "aiImagePanel",
+      "minimumSize": { "width": 230, "height": 260 },
+      "maximumSize": { "width": 2000, "height": 2000 },
+      "preferredDockedSize": { "width": 260, "height": 460 },
+      "preferredFloatingSize": { "width": 280, "height": 520 },
+      "icons": [
+        {
+          "width": 23,
+          "height": 23,
+          "path": "icons/openai.svg",
+          "scale": [1, 2],
+          "theme": ["lightest", "light", "medium", "dark", "darkest", "all"],
+          "species": ["generic"]
+        }
+      ],
+      "label": { "default": "AI Image" }
+    }
+  ],
+  "icons": [
+    {
+      "width": 24,
+      "height": 24,
+      "path": "icons/openai.svg",
+      "scale": [1, 2],
+      "theme": ["lightest", "light", "medium", "dark", "darkest", "all"],
+      "species": ["generic"]
+    }
+  ]
+}

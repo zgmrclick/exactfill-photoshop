@@ -1,0 +1,201 @@
+/* ============================================================================
+ *  style.css — стилі панелі.
+ *
+ *  Написано з нуля, а не вирізано зі старих 1600 рядків: там розмітка була під
+ *  три вкладки (генератор / сітка / чат), і від правил лишились би здебільшого
+ *  селектори неіснуючих блоків. Тут ~200 рядків на одну панель.
+ *
+ *  Кольори беремо зі змінних теми Photoshop, щоб панель жила і в темній,
+ *  і в світлій темі без окремих медіа-запитів.
+ * ========================================================================== */
+
+:root {
+    --gap: 8px;
+    --radius: 4px;
+    --fg: var(--uxp-host-text-color, #e8e8e8);
+    --fg-dim: var(--uxp-host-text-color-secondary, #a0a0a0);
+    --bg-raise: var(--uxp-host-background-color-secondary, rgba(127, 127, 127, 0.12));
+    --line: var(--uxp-host-border-color, rgba(127, 127, 127, 0.35));
+    --accent: var(--uxp-host-link-text-color, #2680eb);
+}
+
+body {
+    margin: 0;
+    padding: var(--gap);
+    color: var(--fg);
+    font-size: 11px;
+    /* панель буває вузькою — 230 px за manifest */
+    overflow-x: hidden;
+}
+
+.hidden { display: none !important; }
+
+/* ── Промпт ────────────────────────────────────────────────────────────────── */
+
+#prompt-input {
+    width: 100%;
+    box-sizing: border-box;
+    resize: vertical;
+    min-height: 54px;
+    padding: 6px;
+    margin-bottom: var(--gap);
+    color: var(--fg);
+    background: var(--bg-raise);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    font-family: inherit;
+    font-size: 12px;
+    line-height: 1.35;
+}
+#prompt-input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+/* ── Рядки з підписами ─────────────────────────────────────────────────────── */
+
+.row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+    flex-wrap: wrap;
+}
+.field { margin-bottom: 6px; }
+
+.lbl {
+    flex: 0 0 auto;
+    min-width: 62px;
+    color: var(--fg-dim);
+}
+.lbl-2 { min-width: 0; margin-left: 4px; }
+
+.grow { flex: 1 1 auto; min-width: 0; }
+
+sp-picker, sp-textfield, sp-number-field { max-width: 100%; }
+sp-textfield { width: 100%; margin-bottom: 6px; }
+sp-number-field { width: 68px; }
+
+/* ── Сегментований перемикач якості ────────────────────────────────────────── */
+
+.seg {
+    display: flex;
+    margin-top: 4px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+}
+.seg-btn {
+    flex: 1 1 0;
+    padding: 4px 2px;
+    color: var(--fg-dim);
+    background: transparent;
+    border: none;
+    border-right: 1px solid var(--line);
+    font-family: inherit;
+    font-size: 10px;
+    cursor: pointer;
+    /* довгі підписи не мусять розсувати панель */
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.seg-btn:last-child { border-right: none; }
+.seg-btn:hover { background: var(--bg-raise); color: var(--fg); }
+.seg-btn.active {
+    color: #fff;
+    background: var(--accent);
+}
+
+/* ── Генерація ─────────────────────────────────────────────────────────────── */
+
+.gen-row { margin-top: var(--gap); }
+#generate-btn { width: 100%; }
+
+.spinner {
+    flex: 0 0 auto;
+    width: 14px; height: 14px;
+    border: 2px solid var(--line);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.status {
+    margin: 4px 0 0;
+    min-height: 13px;
+    color: var(--fg-dim);
+    font-size: 10px;
+    /* довгий текст помилки не мусить ламати верстку */
+    overflow-wrap: anywhere;
+}
+
+.hint {
+    margin: 0 0 var(--gap);
+    color: var(--fg-dim);
+    line-height: 1.4;
+}
+.hint a { color: var(--accent); }
+
+/* ── Секції, що згортаються ────────────────────────────────────────────────── */
+
+.section {
+    margin-top: var(--gap);
+    padding-top: var(--gap);
+    border-top: 1px solid var(--line);
+}
+
+.collapsible .head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 3px 0;
+    color: var(--fg-dim);
+    cursor: pointer;
+    user-select: none;
+}
+.collapsible .head:hover { color: var(--fg); }
+.collapsible .body { padding-top: 6px; }
+
+.badge {
+    padding: 0 5px;
+    color: #fff;
+    background: var(--accent);
+    border-radius: 8px;
+    font-size: 9px;
+}
+.badge:empty { display: none; }
+
+/* ── Рядки пресетів та історії ─────────────────────────────────────────────── */
+
+.preset-row, .history-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 0;
+    min-width: 0;
+}
+.preset-row sp-checkbox { flex: 1 1 auto; min-width: 0; }
+
+.history-prompt {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+}
+.history-prompt:hover { color: var(--accent); }
+
+.icon-btn {
+    flex: 0 0 auto;
+    padding: 0 4px;
+    color: var(--fg-dim);
+    background: transparent;
+    border: none;
+    font-size: 11px;
+    cursor: pointer;
+}
+.icon-btn:hover { color: #e34850; }

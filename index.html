@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ── Ключ API ─────────────────────────────────────────────────────────── -->
+<div id="auth" class="section hidden">
+    <p class="hint">
+        Потрібен ключ API для <b id="auth-provider-label">провайдера</b>.
+        <a href="#" id="open-key-page">Отримати ключ</a>
+    </p>
+    <sp-textfield id="api-key-input" type="password" placeholder="Вставте ключ">
+    </sp-textfield>
+    <sp-button id="submit-auth" variant="cta" size="s">Зберегти ключ</sp-button>
+</div>
+
+<!-- ── Основна панель ───────────────────────────────────────────────────── -->
+<div id="main" class="hidden">
+
+    <textarea id="prompt-input" rows="3" placeholder="Що змінити у виділеній області?"></textarea>
+
+    <div class="row">
+        <label class="lbl">Провайдер</label>
+        <sp-picker id="provider-select" size="s" class="grow"></sp-picker>
+    </div>
+
+    <div class="row">
+        <label class="lbl">Модель</label>
+        <sp-picker id="model-select" size="s" class="grow"></sp-picker>
+    </div>
+
+    <div class="field">
+        <label class="lbl">Якість</label>
+        <div id="quality-toggle" class="seg"></div>
+    </div>
+
+    <div class="row">
+        <label class="lbl">Варіацій</label>
+        <sp-number-field id="variations-value" size="s" min="1" max="4" value="1"></sp-number-field>
+
+        <label class="lbl lbl-2">Контекст %</label>
+        <sp-number-field id="context-pad" size="s" min="0" max="50" step="5" value="15"></sp-number-field>
+    </div>
+
+    <sp-checkbox id="use-layer-only" size="s">Лише активний шар</sp-checkbox>
+
+    <div class="row gen-row">
+        <sp-button id="generate-btn" variant="cta" class="grow">Генерувати</sp-button>
+        <div id="spinner" class="spinner hidden"></div>
+    </div>
+    <p id="status-text" class="status"></p>
+
+    <!-- Пресети -->
+    <div class="section collapsible">
+        <div id="preset-header" class="head">
+            <span>Пресети промпту</span><span id="preset-count" class="badge"></span>
+        </div>
+        <div id="preset-body" class="body hidden">
+            <div id="preset-list"></div>
+            <sp-textfield id="new-preset-name" placeholder="Назва"></sp-textfield>
+            <sp-textfield id="new-preset-content" placeholder="Текст, що додається до промпту"></sp-textfield>
+            <sp-button id="add-preset-btn" size="s">Додати пресет</sp-button>
+        </div>
+    </div>
+
+    <!-- Історія -->
+    <div class="section collapsible">
+        <div id="history-header" class="head"><span>Історія</span></div>
+        <div id="history-body" class="body hidden">
+            <div id="history-list"></div>
+        </div>
+    </div>
+
+    <div class="section">
+        <sp-button id="signout" size="s" quiet>Змінити ключ</sp-button>
+    </div>
+</div>
+
+<script src="auth.js"></script>
+<script src="main.js"></script>
+</body>
+</html>
