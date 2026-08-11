@@ -42,6 +42,9 @@ async function hasKey(keyName) {
 
 /* ── UI ────────────────────────────────────────────────────────────────────── */
 
+/* Адреса сторінки ключа живе В ПРОВАЙДЕРІ (providers/*.js keyPage) — щоб при
+   додаванні третього провайдера не треба було правити ще й цей файл. Тут лише
+   резерв на випадок, коли поле не заповнене. */
 const KEY_LINKS = {
     openAiApiKey: 'https://platform.openai.com/api-keys',
     googleApiKey: 'https://aistudio.google.com/apikey',
@@ -69,14 +72,12 @@ async function refreshAuthUI() {
         signout.textContent = 'Змінити ключ';
     }
 
+    const providers = require('./providers/index.js');
+    const p = providers.get(localStorage.getItem('ai_provider')) || providers.first();
     const label = document.getElementById('auth-provider-label');
-    if (label) {
-        const providers = require('./providers/index.js');
-        const p = providers.get(localStorage.getItem('ai_provider')) || providers.first();
-        label.textContent = p.label;
-    }
+    if (label) label.textContent = p.label;
     const link = document.getElementById('open-key-page');
-    if (link) link.dataset.url = KEY_LINKS[keyName] || '';
+    if (link) link.dataset.url = p.keyPage || KEY_LINKS[keyName] || '';
 }
 
 async function submitAuth() {

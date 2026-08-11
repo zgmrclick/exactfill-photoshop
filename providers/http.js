@@ -88,37 +88,57 @@ class HttpError extends Error {
 /** Статуси, які варто повторити. 429 — ОБОВ'ЯЗКОВО (саме він і був пропущений). */
 const RETRYABLE = s => s === 429 || s === 408 || s === 409 || (s >= 500 && s < 600);
 
+/** Скасування користувачем — окремий тип, щоб withRetry його НЕ повторював. */
+class Cancelled extends Error {
+    constructor() { super('Скасовано'); this.name = 'Cancelled'; this.cancelled = true; }
+}
+
+/**
+ * Зводить зовнішній сигнал скасування й внутрішній таймаут в один контролер.
+ * Повертає { signal, done() } — done() обов'язково викликати у finally, інакше
+ * слухач на зовнішньому сигналі протече між генераціями.
+ */
+function linkAbort(external, timeoutMs) {
+    const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    if (!ctrl) return { signal: undefined, done() {}, wasCancelled: () => false };
+    let cancelled = false;
+    const onExternal = () => { cancelled = true; ctrl.abort(); };
+    if (external) {
+        if (external.aborted) onExternal();
+        else external.addEventListener('abort', onExternal);
+    }
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    return {
+        signal: ctrl.signal,
+        wasCancelled: () => cancelled,
+        done() {
+            clearTimeout(timer);
+            if (external) { try { external.removeEventListener('abort', onExternal); } catch (e) {} }
+        },
+    };
+}
+
 /**
  * fetch із реальним скасуванням і читабельними помилками.
  * timeoutMs великий свідомо: генерація зображення на high може йти хвилини.
+ * signal — зовнішній AbortSignal кнопки «Скасувати».
  */
-async function request(url, { method = 'GET', headers = {}, body, timeoutMs = 300000 } = {}) {
-    const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    let timer = null;
+async function request(url, { method = 'GET', headers = {}, body, timeoutMs = 300000, signal } = {}) {
+    const link = linkAbort(signal, timeoutMs);
     try {
-        if (ctrl) timer = setTimeout(() => ctrl.abort(), timeoutMs);
         let res;
         try {
-            res = await fetch(url, { method, headers, body, signal: ctrl ? ctrl.signal : undefined });
+            res = await fetch(url, { method, headers, body, signal: link.signal });
         } catch (e) {
             if (e && (e.name === 'AbortError' || String(e.message).includes('abort'))) {
+                if (link.wasCancelled()) throw new Cancelled();
                 throw new HttpError(0, `Запит перевищив ${Math.round(timeoutMs / 1000)} с і був скасований`);
             }
             throw new HttpError(0, `Немає з'єднання з ${new URL(url).host}: ${e.message}`);
         }
 
         const text = await res.text();
-        if (!res.ok) {
-            let msg = `HTTP ${res.status}`;
-            try {
-                const j = JSON.parse(text);
-                msg = j?.error?.message || j?.error?.status || j?.message || msg;
-            } catch (e) {
-                if (text) msg += `: ${text.slice(0, 300)}`;
-            }
-            const ra = res.headers && res.headers.get ? res.headers.get('retry-after') : null;
-            throw new HttpError(res.status, msg, ra ? Number(ra) : null);
-        }
+        if (!res.ok) throw errorFromBody(res, text);
 
         try {
             return JSON.parse(text);
@@ -126,8 +146,104 @@ async function request(url, { method = 'GET', headers = {}, body, timeoutMs = 30
             throw new HttpError(res.status, 'Провайдер повернув не JSON — можливо, змінився формат API');
         }
     } finally {
-        if (timer) clearTimeout(timer);
+        link.done();
     }
+}
+
+function errorFromBody(res, text) {
+    let msg = `HTTP ${res.status}`;
+    try {
+        const j = JSON.parse(text);
+        msg = j?.error?.message || j?.error?.status || j?.message || msg;
+    } catch (e) {
+        if (text) msg += `: ${text.slice(0, 300)}`;
+    }
+    const ra = res.headers && res.headers.get ? res.headers.get('retry-after') : null;
+    return new HttpError(res.status, msg, ra ? Number(ra) : null);
+}
+
+/**
+ * SSE-запит для провайдерів, що вміють віддавати проміжні кадри.
+ *
+ * ⚠️ ЧЕСНО ПРО ОБМЕЖЕННЯ: чи підтримує fetch в UXP потокове ЧИТАННЯ тіла
+ * (`res.body.getReader`) — не задокументовано, і перевірити це з ExtendScript
+ * неможливо (там немає fetch). Тому робимо перевірку можливості в рантаймі:
+ * якщо reader є — читаємо подіями, якщо ні — дочитуємо весь текст і віддаємо
+ * ті самі події одним пакетом. Прев'ю тоді просто не буде проміжним, але
+ * генерація не зламається. Який шлях спрацював — видно в консолі.
+ *
+ * @param {(ev:object)=>void} onEvent — виклик на кожну розібрану SSE-подію
+ * @returns {Promise<object|null>} остання подія (…completed), якщо була
+ */
+async function requestStream(url, { method = 'POST', headers = {}, body, timeoutMs = 300000, signal } = {}, onEvent) {
+    const link = linkAbort(signal, timeoutMs);
+    try {
+        let res;
+        try {
+            res = await fetch(url, { method, headers, body, signal: link.signal });
+        } catch (e) {
+            if (e && (e.name === 'AbortError' || String(e.message).includes('abort'))) {
+                if (link.wasCancelled()) throw new Cancelled();
+                throw new HttpError(0, `Потік перевищив ${Math.round(timeoutMs / 1000)} с`);
+            }
+            throw new HttpError(0, `Немає з'єднання з ${new URL(url).host}: ${e.message}`);
+        }
+        if (!res.ok) throw errorFromBody(res, await res.text());
+
+        let last = null;
+        const feed = chunk => { for (const ev of parseSse(chunk)) { last = ev; if (onEvent) onEvent(ev); } };
+
+        const canStream = res.body && typeof res.body.getReader === 'function';
+        if (canStream) {
+            const reader = res.body.getReader();
+            let buf = '';
+            for (;;) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buf += bytesToStr(value);
+                // подія завершується порожнім рядком; тримаємо хвіст у буфері
+                const cut = buf.lastIndexOf('\n\n');
+                if (cut >= 0) { feed(buf.slice(0, cut + 2)); buf = buf.slice(cut + 2); }
+            }
+            if (buf.trim()) feed(buf);
+        } else {
+            console.log('[http] потокове читання недоступне — розбираю SSE одним пакетом');
+            feed(await res.text());
+        }
+        return last;
+    } finally {
+        link.done();
+    }
+}
+
+/** UTF-8 з байтів без TextDecoder (в UXP його теж може не бути). */
+function bytesToStr(bytes) {
+    if (!bytes) return '';
+    if (typeof bytes === 'string') return bytes;
+    let s = '';
+    const CHUNK = 8192;
+    const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    for (let i = 0; i < arr.length; i += CHUNK) {
+        s += String.fromCharCode.apply(null, arr.subarray(i, Math.min(i + CHUNK, arr.length)));
+    }
+    // base64 у SSE — ASCII, тому декодування UTF-8 тут не потрібне
+    return s;
+}
+
+/** Розбирає блок SSE у масив об'єктів із рядків `data:`. */
+function parseSse(chunk) {
+    const out = [];
+    for (const block of String(chunk).split(/\n\n/)) {
+        const dataLines = [];
+        for (const line of block.split(/\n/)) {
+            if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+        }
+        if (!dataLines.length) continue;
+        const payload = dataLines.join('');
+        if (payload === '[DONE]') continue;
+        try { out.push(JSON.parse(payload)); } catch (e) { /* неповний кадр — пропускаємо */ }
+    }
+    return out;
 }
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -140,6 +256,9 @@ async function withRetry(fn, { tries = 4, baseDelay = 1200 } = {}) {
             return await fn();
         } catch (e) {
             last = e;
+            // Скасування користувачем — не помилка мережі, повторювати НЕ можна:
+            // інакше кнопка «Скасувати» лише подовжувала б очікування вчетверо.
+            if (e && e.cancelled) throw e;
             const status = e && e.status;
             if (!RETRYABLE(status) || attempt === tries - 1) throw e;
             const wait = (e.retryAfter ? e.retryAfter * 1000 : baseDelay * Math.pow(2, attempt))
@@ -153,5 +272,5 @@ async function withRetry(fn, { tries = 4, baseDelay = 1200 } = {}) {
 
 module.exports = {
     strToBytes, blobToBase64, buildMultipart,
-    request, withRetry, HttpError, RETRYABLE, sleep,
+    request, requestStream, withRetry, HttpError, Cancelled, RETRYABLE, sleep,
 };

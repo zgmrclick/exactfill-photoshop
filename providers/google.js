@@ -111,7 +111,19 @@ function extractImage(json) {
     throw new HttpError(0, describeRefusal(json));
 }
 
-async function callOnce({ apiKey, model, prompt, imageBlob, plan, withImageConfig }) {
+/** Gemini називає облік інакше, ніж OpenAI — зводимо до однієї форми. */
+function normalizeUsage(json) {
+    const u = json && (json.usageMetadata || json.usage_metadata);
+    if (!u) return null;
+    return {
+        input_tokens: u.promptTokenCount ?? u.prompt_token_count ?? null,
+        output_tokens: u.candidatesTokenCount ?? u.candidates_token_count ?? null,
+        total_tokens: u.totalTokenCount ?? u.total_token_count ?? null,
+    };
+}
+
+async function callOnce({ apiKey, model, prompt, imageBlob, references, plan,
+                          withImageConfig, signal }) {
     const payload = {
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: {
@@ -124,11 +136,13 @@ async function callOnce({ apiKey, model, prompt, imageBlob, plan, withImageConfi
         if (plan.aspectRatio) payload.generationConfig.imageConfig.aspectRatio = plan.aspectRatio;
         if (plan.imageSize)   payload.generationConfig.imageConfig.imageSize   = plan.imageSize;
     }
-    if (imageBlob) {
+    // Порядок важливий: спершу область, яку правимо, потім референси —
+    // модель трактує перше зображення як основне.
+    for (const blob of [imageBlob].concat(references || []).filter(Boolean)) {
         payload.contents[0].parts.push({
             inline_data: {
-                mime_type: imageBlob.type || 'image/jpeg',
-                data: await blobToBase64(imageBlob),
+                mime_type: blob.type || 'image/png',
+                data: await blobToBase64(blob),
             },
         });
     }
@@ -138,8 +152,9 @@ async function callOnce({ apiKey, model, prompt, imageBlob, plan, withImageConfi
         method: 'POST',
         headers: authHeaders(apiKey),
         body: JSON.stringify(payload),
+        signal,
     });
-    return extractImage(json);
+    return { images: [extractImage(json)], usage: normalizeUsage(json) };
 }
 
 /**
@@ -164,25 +179,19 @@ async function callWithFallback(args) {
     }
 }
 
-async function generate({ apiKey, model, prompt, imageBlob, plan, n = 1, onProgress }) {
+async function generate({ apiKey, model, prompt, imageBlob, references, plan,
+                          ignorePixels, signal, onProgress }) {
     if (!apiKey) throw new Error('Немає ключа Google — увійдіть у розділі API');
     if (!prompt || !prompt.trim()) throw new Error('Порожній промпт');
 
-    const total = Math.max(1, n);
-    const out = [];
-    for (let i = 0; i < total; i++) {
-        if (onProgress) onProgress(i, total, 'Генерація…');
-        try {
-            const b64 = await withRetry(() => callWithFallback({ apiKey, model, prompt, imageBlob, plan }));
-            out.push(b64);
-            if (onProgress) onProgress(i + 1, total, 'Готово');
-        } catch (e) {
-            if (onProgress) onProgress(i + 1, total, 'Помилка', e);
-            if (!out.length) throw e;
-            console.error(`[google] варіація ${i + 1}/${total} не вдалась: ${e.message}`);
-        }
-    }
-    return out;
+    if (onProgress) onProgress('Генерація…');
+    const res = await withRetry(() => callWithFallback({
+        apiKey, model, prompt,
+        imageBlob: ignorePixels ? null : imageBlob,
+        references, plan, signal,
+    }));
+    if (onProgress) onProgress('Готово');
+    return res;
 }
 
 module.exports = {
@@ -192,7 +201,15 @@ module.exports = {
     // Параметра маски в Gemini немає. Область правки модель бачить із того, що
     // ми надсилаємо саме виділену область (плюс контекст навколо) — тому
     // прямокутної маски тут просто не існує, і main.js її не будує.
+    // Шов усе одно мʼякшиться: розмиття layer-маски робиться на боці Photoshop.
     supportsMask: false,
+    supportsReferences: true,
+    // Прозорого фону параметром немає — лишається просити словами в промпті.
+    supportsTransparent: false,
+    // Проміжні кадри є лише в новому Interactions API (/v1beta/interactions);
+    // цей файл ходить у generateContent, тому потоку тут поки немає.
+    supportsStream: false,
+    keyPage: 'https://aistudio.google.com/apikey',
     models,
     capsFor,
     generate,

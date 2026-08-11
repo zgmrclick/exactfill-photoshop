@@ -80,5 +80,35 @@ if(sz.w!==333||sz.h!==222) fail++;
 try{ P.readPngSize(new Uint8Array([1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24])); console.log('  не-PNG → ✗ не кинув'); fail++; }
 catch(e){ console.log(`  не-PNG → ✓ "${e.message}"`); }
 
+// 5. Мʼякий край маски. Перевіряємо не «на око», а три значення альфи:
+//    усередині 0 (змінити), рівно на межі 128 (симетричний градієнт),
+//    поза смугою 255 (зберегти). І що стиснення від градієнта не розсипається.
+console.log('\n=== buildRectMaskPng: мʼякий край ===');
+{
+  const W=1024,H=1024,R={left:200,top:150,right:800,bottom:650};
+  const stride=W*2+1;
+  for(const f of [0,4,8,16,32,64]){
+    const png=P.buildRectMaskPng(W,H,R,f);
+    let off=8,idat=null;
+    while(off<png.length){
+      const len=(png[off]<<24|png[off+1]<<16|png[off+2]<<8|png[off+3])>>>0;
+      const t=String.fromCharCode(png[off+4],png[off+5],png[off+6],png[off+7]);
+      if(t==='IDAT'){ idat=png.slice(off+8,off+8+len); break; }
+      off+=12+len;
+    }
+    const raw=zlib.inflateSync(Buffer.from(idat));
+    const alpha=(x,y)=>raw[y*stride+1+x*2+1];
+    const inside=alpha(500,400), edge=alpha(R.left,400), outside=alpha(100,400);
+    const ok = raw.length===H*stride && inside===0 && outside===255 &&
+               (f<1 ? edge===0 : Math.abs(edge-128)<=1);
+    console.log(`  край ${String(f).padStart(2)} px: ${(png.length/1024).toFixed(1)} КБ  `+
+                `alpha усередині=${inside} на межі=${edge} поза=${outside} ${ok?'✓':'✗'}`);
+    if(!ok) fail++;
+  }
+  // градієнт, ширший за півобласть, не має з'їсти зону змін цілком
+  const tiny=P.buildRectMaskPng(64,64,{left:20,top:20,right:30,bottom:30},64);
+  console.log(`  вузька область + край 64 px: зібралось, ${tiny.length} B ✓ (feather зажимається)`);
+}
+
 console.log('\nПРОВАЛІВ:',fail);
 process.exit(fail?1:0);

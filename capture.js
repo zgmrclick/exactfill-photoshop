@@ -27,12 +27,26 @@ const { batchPlay } = require('photoshop').action;
 const uxpStorage = require('uxp').storage;
 
 const { withPixels } = require('./place.js');
-const { buildRectMaskPng } = require('./png.js');
+const { buildRectMaskPng, encodePng } = require('./png.js');
 
 /** Режими, які imaging API обслуговує безпечно. Решта — через дублікат. */
 const SAFE_MODES = ['RGBColorMode', 'grayscaleMode', 'GrayscaleMode', 'labColorMode', 'LabColorMode'];
 
 const isSafeMode = mode => SAFE_MODES.some(m => String(mode).toLowerCase() === m.toLowerCase());
+
+/**
+ * Поріг для входу без втрат.
+ *
+ * Навіщо поріг: JPEG q12 з'їдає дрібний шрифт і контури — модель сумлінно
+ * відтворює артефакти, які ми самі й створили. PNG цього не робить. Але наш
+ * deflate — fixed-Huffman із RLE лише на distance 1 і rowStride: на однорідній
+ * масці це стиснення в сотні разів, на фотографії — майже літерали. Тобто
+ * 2000×1500 RGB дасть ~9 МБ і кілька секунд роботи в JS.
+ *
+ * 2 МП — межа, де це ще швидко. Вище автоматично падаємо на JPEG і кажемо про
+ * це в консоль, щоб «чому раптом гірше» не було загадкою.
+ */
+const LOSSLESS_MAX_PX = 2_000_000;
 
 /**
  * Складає JPEG із ImageData.
@@ -74,8 +88,46 @@ async function imageDataToJpegBlob(imageData) {
     }
 }
 
+/**
+ * Складає PNG із ImageData нашим кодером — вхід без втрат.
+ * Альфу відкидаємо: провайдеру вона не потрібна, а 3 компоненти замість 4 —
+ * на чверть менше байтів у deflate.
+ */
+async function imageDataToPngBlob(imageData) {
+    const src = await imageData.getData();
+    const w = imageData.width, h = imageData.height;
+    const comps = imageData.components;
+    let rgb;
+    if (comps === 3) {
+        rgb = src instanceof Uint8Array ? src : Uint8Array.from(src);
+    } else if (comps === 4) {
+        const count = w * h;
+        rgb = new Uint8Array(count * 3);
+        for (let i = 0; i < count; i++) {
+            rgb[i * 3]     = src[i * 4];
+            rgb[i * 3 + 1] = src[i * 4 + 1];
+            rgb[i * 3 + 2] = src[i * 4 + 2];
+        }
+    } else if (comps === 1) {
+        // Grayscale-документ: розгортаємо в RGB, бо провайдери чекають колір
+        const count = w * h;
+        rgb = new Uint8Array(count * 3);
+        for (let i = 0; i < count; i++) {
+            const v = src[i];
+            rgb[i * 3] = v; rgb[i * 3 + 1] = v; rgb[i * 3 + 2] = v;
+        }
+    } else {
+        throw new Error(`Неочікувана кількість компонент: ${comps}`);
+    }
+    const t0 = Date.now();
+    const png = encodePng(rgb, w, h, 3);
+    console.log(`[capture] PNG ${w}×${h}: ${(png.length / 1048576).toFixed(2)} МБ ` +
+                `за ${Date.now() - t0} мс`);
+    return new Blob([png], { type: 'image/png' });
+}
+
 /** Прямий шлях — документ не змінюється жодним чином. */
-async function captureDirect(bounds, useLayerOnly) {
+async function captureDirect(bounds, useLayerOnly, lossless) {
     const params = {
         sourceBounds: {
             left: bounds.left, top: bounds.top,
@@ -92,14 +144,14 @@ async function captureDirect(bounds, useLayerOnly) {
         const layer = app.activeDocument.activeLayers[0];
         if (layer) params.layerID = layer.id;
     }
-    return withPixels(params, imageDataToJpegBlob);
+    return withPixels(params, lossless ? imageDataToPngBlob : imageDataToJpegBlob);
 }
 
 /**
  * Шлях через дублікат: конвертуємо КОПІЮ, зберігаємо JPEG, копію закриваємо.
  * imaging тут не задіяний узагалі, тому CMYK не має де впасти.
  */
-async function captureViaDuplicate(bounds, useLayerOnly) {
+async function captureViaDuplicate(bounds, useLayerOnly, lossless) {
     const doc = app.activeDocument;
     let dup = null;
     let file = null;
@@ -149,6 +201,15 @@ async function captureViaDuplicate(bounds, useLayerOnly) {
         });
 
         const folder = await uxpStorage.localFileSystem.getTemporaryFolder();
+        // PNG пише сам Photoshop — тут наш кодер не задіяний, тому поріг
+        // швидкості на цей шлях не поширюється; лишаємо його лише для
+        // узгодженості з прямим шляхом.
+        if (lossless) {
+            file = await folder.createFile(`cap_${Date.now()}.png`, { overwrite: true });
+            await dup.saveAs.png(file, { compression: 6, interlaced: false }, true);
+            const buf = await file.read({ format: uxpStorage.formats.binary });
+            return new Blob([buf], { type: 'image/png' });
+        }
         file = await folder.createFile(`cap_${Date.now()}.jpg`, { overwrite: true });
         await dup.saveAs.jpg(file, { quality: 12 }, true);
 
@@ -169,9 +230,10 @@ async function captureViaDuplicate(bounds, useLayerOnly) {
  *
  * @param {{left,top,right,bottom}} bounds — цілі межі (geometry.integerTarget)
  * @param {boolean} useLayerOnly — лише активний шар замість зведеного
- * @returns {Promise<{blob:Blob, docMode:string, bpc:number, viaDuplicate:boolean}>}
+ * @param {boolean} wantLossless — просити PNG замість JPEG (авто-деградація вище порогу)
+ * @returns {Promise<{blob:Blob, docMode:string, bpc:number, viaDuplicate:boolean, lossless:boolean}>}
  */
-async function captureRegion(bounds, useLayerOnly = false) {
+async function captureRegion(bounds, useLayerOnly = false, wantLossless = true) {
     const doc = app.activeDocument;
     if (!doc) throw new Error('Немає активного документа');
 
@@ -181,10 +243,17 @@ async function captureRegion(bounds, useLayerOnly = false) {
     const h = bounds.bottom - bounds.top;
     if (w < 1 || h < 1) throw new Error(`Порожня область захоплення ${w}×${h}`);
 
+    let lossless = wantLossless;
+    if (lossless && w * h > LOSSLESS_MAX_PX) {
+        lossless = false;
+        console.log(`[capture] ${w}×${h} = ${(w * h / 1e6).toFixed(1)} МП — вище порогу ` +
+                    `${LOSSLESS_MAX_PX / 1e6} МП, беру JPEG замість PNG`);
+    }
+
     if (isSafeMode(docMode)) {
         try {
-            const blob = await captureDirect(bounds, useLayerOnly);
-            return { blob, docMode, bpc, viaDuplicate: false };
+            const blob = await captureDirect(bounds, useLayerOnly, lossless);
+            return { blob, docMode, bpc, viaDuplicate: false, lossless };
         } catch (e) {
             // Відома регресія: componentSize:8 із 16-бітного документа кидає
             // «Photoshop Error. Code: -1» починаючи з PS 26.3 (у 25.0 працювало).
@@ -193,8 +262,8 @@ async function captureRegion(bounds, useLayerOnly = false) {
         }
     }
 
-    const blob = await captureViaDuplicate(bounds, useLayerOnly);
-    return { blob, docMode, bpc, viaDuplicate: true };
+    const blob = await captureViaDuplicate(bounds, useLayerOnly, lossless);
+    return { blob, docMode, bpc, viaDuplicate: true, lossless };
 }
 
-module.exports = { captureRegion, buildRectMaskPng, isSafeMode };
+module.exports = { captureRegion, buildRectMaskPng, isSafeMode, LOSSLESS_MAX_PX };

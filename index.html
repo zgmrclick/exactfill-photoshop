@@ -20,7 +20,8 @@
 <!-- ── Основна панель ───────────────────────────────────────────────────── -->
 <div id="main" class="hidden">
 
-    <textarea id="prompt-input" rows="3" placeholder="Що змінити у виділеній області?"></textarea>
+    <textarea id="prompt-input" rows="3"
+              placeholder="Що змінити у виділеній області?  (Cmd+Enter — генерувати)"></textarea>
 
     <div class="row">
         <label class="lbl">Провайдер</label>
@@ -38,20 +39,75 @@
     </div>
 
     <div class="row">
-        <label class="lbl">Варіацій</label>
-        <sp-number-field id="variations-value" size="s" min="1" max="4" value="1"></sp-number-field>
-
-        <label class="lbl lbl-2">Контекст %</label>
+        <label class="lbl" title="Скільки оточення надіслати моделі як контекст">Контекст %</label>
         <sp-number-field id="context-pad" size="s" min="0" max="50" step="5" value="15"></sp-number-field>
+
+        <label class="lbl lbl-2" title="Розмиття краю: і маски запиту, і маски шару">Край px</label>
+        <sp-number-field id="edge-feather" size="s" min="0" max="64" step="2" value="8"></sp-number-field>
     </div>
 
-    <sp-checkbox id="use-layer-only" size="s">Лише активний шар</sp-checkbox>
+    <div class="checks">
+        <sp-checkbox id="use-layer-only" size="s"
+            title="Надіслати лише активний шар замість зведеного зображення">Лише активний шар</sp-checkbox>
+        <sp-checkbox id="lossless-input" size="s" checked
+            title="PNG замість JPEG: без артефактів на дрібному шрифті. Вище 2 МП автоматично JPEG">Вхід без втрат</sp-checkbox>
+        <sp-checkbox id="transparent-bg" size="s"
+            title="background=transparent — лише OpenAI">Прозорий фон</sp-checkbox>
+        <sp-checkbox id="ignore-pixels" size="s"
+            title="Генерувати з нуля, не дивлячись на наявні пікселі">Ігнорувати пікселі</sp-checkbox>
+        <sp-checkbox id="live-preview" size="s" checked
+            title="Проміжні кадри під час генерації — лише OpenAI">Живий прев'ю</sp-checkbox>
+    </div>
+
+    <!-- Референси -->
+    <div class="section collapsible">
+        <div id="ref-header" class="head">
+            <span>Референсні зображення</span><span id="ref-count" class="badge"></span>
+        </div>
+        <div id="ref-body" class="body hidden">
+            <p class="hint">Приклади стилю або товару. Перше зображення — завжди ваша виділена
+               область, референси йдуть після неї.</p>
+            <div id="ref-list" class="chips"></div>
+            <div class="row">
+                <sp-button id="add-ref-btn" size="s">Додати файли…</sp-button>
+                <sp-button id="clear-ref-btn" size="s" quiet>Очистити</sp-button>
+            </div>
+        </div>
+    </div>
+
+    <p id="plan-line" class="plan"></p>
 
     <div class="row gen-row">
         <sp-button id="generate-btn" variant="cta" class="grow">Генерувати</sp-button>
+        <sp-button id="cancel-btn" size="s" variant="secondary" class="hidden">Скасувати</sp-button>
         <div id="spinner" class="spinner hidden"></div>
     </div>
+    <div class="row gen-row">
+        <sp-button id="regen-btn" size="s" quiet class="grow" disabled
+            title="Той самий промпт і та сама область — без нового виділення">Перегенерувати</sp-button>
+    </div>
+
     <p id="status-text" class="status"></p>
+    <p id="residual-text" class="residual"></p>
+
+    <div id="preview-wrap" class="preview hidden">
+        <img id="preview-img" alt="прев'ю">
+    </div>
+
+    <p id="cost-line" class="cost"></p>
+
+    <!-- Кеш результатів -->
+    <div class="section collapsible">
+        <div id="cache-header" class="head">
+            <span>Кеш результатів</span><span id="cache-badge" class="badge"></span>
+        </div>
+        <div id="cache-body" class="body hidden">
+            <p class="hint">Останні результати лежать на диску. Повторна вставка з кешу —
+               без запиту до провайдера, тобто безкоштовно.</p>
+            <div id="cache-list"></div>
+            <sp-button id="clear-cache-btn" size="s" quiet>Очистити кеш</sp-button>
+        </div>
+    </div>
 
     <!-- Пресети -->
     <div class="section collapsible">

@@ -196,7 +196,8 @@ const { integerTarget, planFrame } = require('./geometry.js');
  *  channelName— альфа-канал зі збереженим виділенням (для маски); null = без маски
  *  Викликати ВСЕРЕДИНІ core.executeAsModal.
  * ═════════════════════════════════════════════════════════════════════════ */
-async function placeGeneratedSmartObject(b64, bounds, channelName) {
+async function placeGeneratedSmartObject(b64, bounds, channelName, opts = {}) {
+    const maskFeather = Math.max(0, Number(opts.maskFeather) || 0);
     const doc = app.activeDocument;
     if (!doc) throw new Error('Немає активного документа');
 
@@ -318,7 +319,7 @@ async function placeGeneratedSmartObject(b64, bounds, channelName) {
 
         /* 6. Маска шару: показуємо рівно виділення. Для cover це ще й обріз
               надлишку; для exact — захист від субпіксельного краю. */
-        if (channelName) await applySelectionMask(channelName, target);
+        if (channelName) await applySelectionMask(channelName, target, maskFeather);
 
         console.log('[place]', JSON.stringify(report));
         return report;
@@ -337,8 +338,15 @@ async function placeGeneratedSmartObject(b64, bounds, channelName) {
     }
 }
 
-/** Відновлює виділення з альфа-каналу (резерв — прямокутник) і робить маску. */
-async function applySelectionMask(channelName, target) {
+/**
+ * Відновлює виділення з альфа-каналу (резерв — прямокутник) і робить маску.
+ *
+ * feather — розмиття межі маски В ПІКСЕЛЯХ. Це ДРУГА маска, не та, що йде в
+ * OpenAI: request-маску Gemini не приймає взагалі, а ця працює на боці
+ * Photoshop і тому мʼякшить шов однаково для обох провайдерів. Саме її варто
+ * крутити, коли «видно, де вставлено».
+ */
+async function applySelectionMask(channelName, target, feather = 0) {
     const restore = async () => {
         try {
             await batchPlay([{ _obj: 'set', _target: { _ref: 'selection' },
@@ -355,6 +363,15 @@ async function applySelectionMask(channelName, target) {
         }
     };
     if (!await restore()) return;
+    if (feather > 0) {
+        // Feather Selection ДО створення маски: розмити вже готову маску
+        // складніше (потрібен вибір каналу маски й Gaussian Blur), а тут
+        // Photoshop робить те саме одним кроком.
+        try {
+            await batchPlay([{ _obj: 'feather', radius: PX(feather),
+                _options: { dialogOptions: 'dontDisplay' } }], {});
+        } catch (e) { console.warn('[place] розмиття виділення не вдалось:', e.message); }
+    }
     try {
         await batchPlay([{ _obj: 'make', new: { _class: 'channel' },
             at: { _ref: 'channel', _enum: 'channel', _value: 'mask' },

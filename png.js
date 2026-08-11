@@ -272,23 +272,47 @@ function setPngResolution(png, ppi) {
  * Grey+Alpha (2 байти/піксель) замість RGBA — удвічі менше даних до deflate,
  * а сірий канал провайдером усе одно не читається.
  *
+ * feather — ширина градієнта В ПІКСЕЛЯХ, симетрична навколо межі
+ * (feather/2 назовні, feather/2 всередину). Жорсткий край дає видимий шов:
+ * модель малює до самої лінії, і різниця в зерні/освітленні читається як рубець.
+ * Плавний перехід змушує її змішувати з контекстом.
+ *
+ * Стиснення від градієнта майже не страждає: RLE ловить рядки, а неоднорідна
+ * смуга — лише по периметру.
+ *
  * @param {{left,top,right,bottom}} rect — у координатах маски, не документа
+ * @param {number} feather — 0 = жорсткий край
  */
-function buildRectMaskPng(width, height, rect) {
+function buildRectMaskPng(width, height, rect, feather = 0) {
     const L = Math.max(0, Math.round(rect.left));
     const T = Math.max(0, Math.round(rect.top));
     const R = Math.min(width, Math.round(rect.right));
     const B = Math.min(height, Math.round(rect.bottom));
     if (R <= L || B <= T) throw new Error('Порожній прямокутник маски');
 
+    // ширший за півобласть градієнт з'їв би її цілком — тоді «змінити» не
+    // залишиться взагалі, і модель повернула б вхід без змін
+    const f = Math.max(0, Math.min(feather, (R - L) / 2 - 1, (B - T) / 2 - 1));
+    const half = f / 2;
+
     const px = new Uint8Array(width * height * 2);
     for (let y = 0; y < height; y++) {
-        const inRow = y >= T && y < B;
+        const dy = Math.min(y - T, B - 1 - y);
         let o = y * width * 2;
         for (let x = 0; x < width; x++, o += 2) {
-            const inside = inRow && x >= L && x < R;
-            px[o]     = inside ? 0 : 255;      // сірий: косметика, провайдер його не читає
-            px[o + 1] = inside ? 0 : 255;      // alpha: 0 = змінити, 255 = зберегти
+            const dx = Math.min(x - L, R - 1 - x);
+            const d = Math.min(dx, dy);              // >0 усередині, <0 назовні
+            let a;
+            if (f < 1) {
+                a = d >= 0 ? 0 : 255;
+            } else {
+                let t = (d + half) / f;              // 0 на зовнішньому краї смуги, 1 на внутрішньому
+                t = t < 0 ? 0 : t > 1 ? 1 : t;
+                t = t * t * (3 - 2 * t);             // smoothstep — без злому на краях смуги
+                a = Math.round(255 * (1 - t));
+            }
+            px[o]     = a;    // сірий: косметика, провайдер його не читає
+            px[o + 1] = a;    // alpha: 0 = змінити, 255 = зберегти
         }
     }
     return encodePng(px, width, height, 2);

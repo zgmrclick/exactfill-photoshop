@@ -4,28 +4,40 @@
  *  Тут НЕМА геометрії (geometry.js), НЕМА роботи з пікселями (capture.js),
  *  НЕМА вставки (place.js) і НЕМА знання про провайдерів (providers/).
  *  Старий main.js мав 2797 рядків, з яких на цей сценарій працювало ~850.
+ *
+ *  Варіацій тут свідомо немає. Вони вставляли N шарів один поверх одного з
+ *  однаковою маскою: заплатив за чотири, а порівнювати доводилось кліканням
+ *  видимості в палітрі шарів. Замість них — «Перегенерувати» (та сама область,
+ *  без нового виділення) і кеш результатів (повторна вставка безкоштовна).
  * ========================================================================== */
 
-const { app, core } = require('photoshop');
+const { app, core, action } = require('photoshop');
 const { batchPlay } = require('photoshop').action;
+const uxpStorage = require('uxp').storage;
 
 const providers = require('./providers/index.js');
 const geometry   = require('./geometry.js');
 const place      = require('./place.js');
 const capture    = require('./capture.js');
+const cache      = require('./cache.js');
 const presetManager  = require('./presets.js');
 const historyManager = require('./history.js');
 
 const LS = {
     provider: 'ai_provider', model: 'ai_model', quality: 'ai_quality',
-    n: 'ai_variations', prompt: 'ai_prompt', layerOnly: 'ai_layer_only',
-    pad: 'ai_context_pad',
+    prompt: 'ai_prompt', layerOnly: 'ai_layer_only', pad: 'ai_context_pad',
+    feather: 'ai_edge_feather', lossless: 'ai_lossless', transparent: 'ai_transparent',
+    ignorePixels: 'ai_ignore_pixels', preview: 'ai_live_preview',
+    session: 'ai_session_usage',
 };
 
 const $ = id => document.getElementById(id);
 const QUALITIES = ['low', 'medium', 'high', 'auto'];
 
 let busy = false;
+let abortCtrl = null;
+let references = [];        // [{ name, blob }]
+let lastRun = null;         // { prompt, provider, model, ctx, target, ... }
 
 /* ── Виділення ─────────────────────────────────────────────────────────────── */
 
@@ -68,6 +80,31 @@ function expandForContext(target, doc, padPercent) {
     return { left, top, right, bottom, w: right - left, h: bottom - top };
 }
 
+/* ── Читання налаштувань ───────────────────────────────────────────────────── */
+
+const num = (id, def, lo, hi) => {
+    const v = parseInt($(id)?.value ?? String(def), 10);
+    return Math.max(lo, Math.min(hi, isNaN(v) ? def : v));
+};
+const checked = id => $(id)?.checked === true;
+
+function currentProvider() {
+    return providers.get(localStorage.getItem(LS.provider)) || providers.first();
+}
+
+function readSettings() {
+    return {
+        quality: localStorage.getItem(LS.quality) || 'medium',
+        padPercent: num('context-pad', 15, 0, 50),
+        feather: num('edge-feather', 8, 0, 64),
+        layerOnly: checked('use-layer-only'),
+        lossless: checked('lossless-input'),
+        transparent: checked('transparent-bg'),
+        ignorePixels: checked('ignore-pixels'),
+        livePreview: checked('live-preview'),
+    };
+}
+
 /* ── UI ────────────────────────────────────────────────────────────────────── */
 
 function setStatus(text) {
@@ -79,8 +116,20 @@ function setBusy(on) {
     busy = on;
     const btn = $('generate-btn');
     if (btn) btn.disabled = on;            // захист від подвійного кліку — у старому його не було
+    const regen = $('regen-btn');
+    if (regen) regen.disabled = on || !lastRun;
+    const cancel = $('cancel-btn');
+    if (cancel) cancel.classList.toggle('hidden', !on);
     const sp = $('spinner');
     if (sp) sp.classList.toggle('hidden', !on);
+}
+
+function showPreview(b64) {
+    const wrap = $('preview-wrap'), img = $('preview-img');
+    if (!wrap || !img) return;
+    if (!b64) { wrap.classList.add('hidden'); img.removeAttribute('src'); return; }
+    img.src = 'data:image/png;base64,' + b64;
+    wrap.classList.remove('hidden');
 }
 
 /** sp-picker у частині версій PS не оновлюється через innerHTML — перестворюємо. */
@@ -101,10 +150,6 @@ function fillPicker(id, items, selectedValue) {
     picker.appendChild(menu);
 }
 
-function currentProvider() {
-    return providers.get(localStorage.getItem(LS.provider)) || providers.first();
-}
-
 async function refreshModels() {
     const p = currentProvider();
     let list = [];
@@ -122,6 +167,24 @@ async function refreshModels() {
     fillPicker('model-select', list.map(m => ({ value: m.id, label: m.label })), pick);
 }
 
+/** Гасить елементи, яких провайдер не підтримує, замість тихого ігнорування. */
+function applyProviderCapabilities() {
+    const p = currentProvider();
+    const dim = (id, ok, why) => {
+        const el = $(id);
+        if (!el) return;
+        el.disabled = !ok;
+        el.parentElement?.classList.toggle('unsupported', !ok);
+        if (!ok) el.title = why;
+    };
+    dim('transparent-bg', p.supportsTransparent !== false,
+        `${p.label} не має параметра прозорого фону — попросіть це в промпті`);
+    dim('live-preview', p.supportsStream !== false,
+        `${p.label} не віддає проміжні кадри в цьому API`);
+    dim('add-ref-btn', p.supportsReferences !== false,
+        `${p.label} не приймає додаткових зображень`);
+}
+
 function initQuality() {
     const group = $('quality-toggle');
     if (!group) return;
@@ -137,63 +200,143 @@ function initQuality() {
             localStorage.setItem(LS.quality, q);
             group.querySelectorAll('.seg-btn').forEach(b =>
                 b.classList.toggle('active', b.dataset.value === q));
+            refreshPlanLine();
         });
         group.appendChild(btn);
     }
 }
 
+/* ── Рядок «що саме буде запрошено» ────────────────────────────────────────── */
+
 /**
- * Ініціалізація UI. Кожен блок в окремому try: у старому плагіні
- * ReferenceError у initializeModels обривав ініціалізацію, і разом із ним
- * тихо вмирали refine-пікер та вкладка чату.
+ * Показує розмір запиту ДО натискання кнопки. Це і є відповідь на «побільше для
+ * якості, поменше для економії»: рівень якості видно в мегапікселях, а не на
+ * віру. Читання виділення тут поза executeAsModal — це лише `get`, документ не
+ * змінюється.
  */
-async function initUI() {
-    try {
-        const list = providers.list();
-        const saved = localStorage.getItem(LS.provider) || list[0].id;
-        localStorage.setItem(LS.provider, saved);
-        fillPicker('provider-select', list.map(p => ({ value: p.id, label: p.label })), saved);
-        const picker = $('provider-select');
-        if (picker) picker.addEventListener('change', async e => {
-            localStorage.setItem(LS.provider, e.target.value);
-            localStorage.removeItem(LS.model);
-            await window.aiAuth.refreshAuthUI();
-            await refreshModels();
-        });
-    } catch (e) { console.error('[ui] провайдери:', e.message); }
-
-    try { await refreshModels(); } catch (e) { console.error('[ui] моделі:', e.message); }
-
-    try {
-        const picker = $('model-select');
-        if (picker) picker.addEventListener('change', e => localStorage.setItem(LS.model, e.target.value));
-    } catch (e) { console.error('[ui] модель:', e.message); }
-
-    try { initQuality(); } catch (e) { console.error('[ui] якість:', e.message); }
-
-    try {
-        const bind = (id, key, def, prop = 'value') => {
-            const el = $(id);
-            if (!el) return;
-            const saved = localStorage.getItem(key);
-            if (saved !== null) el[prop] = prop === 'checked' ? saved === 'true' : saved;
-            else if (def !== undefined) el[prop] = def;
-            el.addEventListener('change', () =>
-                localStorage.setItem(key, String(prop === 'checked' ? el.checked : el.value)));
-        };
-        bind('prompt-input', LS.prompt, '');
-        bind('variations-value', LS.n, '1');
-        bind('context-pad', LS.pad, '15');
-        bind('use-layer-only', LS.layerOnly, false, 'checked');
-        const prompt = $('prompt-input');
-        if (prompt) prompt.addEventListener('input', () => localStorage.setItem(LS.prompt, prompt.value));
-    } catch (e) { console.error('[ui] налаштування:', e.message); }
-
-    try { renderPresets(); } catch (e) { console.error('[ui] пресети:', e.message); }
-    try { await historyManager.load(); renderHistory(); } catch (e) { console.error('[ui] історія:', e.message); }
+let planTimer = null;
+function schedulePlanLine() {
+    if (planTimer) clearTimeout(planTimer);
+    planTimer = setTimeout(refreshPlanLine, 250);
 }
 
-/* ── Пресети й історія ─────────────────────────────────────────────────────── */
+async function refreshPlanLine() {
+    const el = $('plan-line');
+    if (!el) return;
+    try {
+        const doc = app.activeDocument;
+        if (!doc) { el.textContent = 'Немає відкритого документа'; el.className = 'plan dim'; return; }
+
+        const sel = await readSelectionBounds(doc).catch(() => null);
+        if (!sel || !sel.bounds) {
+            el.textContent = 'Виділіть прямокутну область';
+            el.className = 'plan dim';
+            return;
+        }
+        const target = geometry.integerTarget(sel.bounds);
+        if (target.w < 1 || target.h < 1) {
+            el.textContent = 'Виділення порожнє';
+            el.className = 'plan dim';
+            return;
+        }
+        const s = readSettings();
+        const ctx = expandForContext(target, doc, s.padPercent);
+        const provider = currentProvider();
+        const model = localStorage.getItem(LS.model);
+        const plan = geometry.planRequest(provider.capsFor(model), ctx, s.quality);
+
+        let what;
+        if (plan.size) {
+            const [w, h] = String(plan.size).split('x').map(Number);
+            what = `${w}×${h} · ${(w * h / 1e6).toFixed(2)} МП`;
+        } else if (plan.aspectRatio) {
+            what = `${plan.aspectRatio} · ${plan.imageSize}`;
+        } else {
+            what = 'розмір за замовчуванням моделі';
+        }
+        const losslessNote = s.lossless && ctx.w * ctx.h > capture.LOSSLESS_MAX_PX
+            ? ' · вхід JPEG (область > 2 МП)' : s.lossless ? ' · вхід PNG' : ' · вхід JPEG';
+        el.textContent = `Запит: ${what}${losslessNote} · виділення ${target.w}×${target.h}` +
+                         (s.padPercent ? ` · контекст ${ctx.w}×${ctx.h}` : '') +
+                         (references.length ? ` · +${references.length} реф.` : '');
+        el.className = 'plan';
+    } catch (e) {
+        el.textContent = '';
+        console.warn('[ui] план не порахувався:', e.message);
+    }
+}
+
+/* ── Облік витрат ──────────────────────────────────────────────────────────── */
+
+function loadSession() {
+    try { return JSON.parse(localStorage.getItem(LS.session)) || { req: 0, inTok: 0, outTok: 0 }; }
+    catch (e) { return { req: 0, inTok: 0, outTok: 0 }; }
+}
+function addUsage(usage) {
+    const s = loadSession();
+    s.req += 1;
+    s.inTok  += Number(usage?.input_tokens)  || 0;
+    s.outTok += Number(usage?.output_tokens) || 0;
+    localStorage.setItem(LS.session, JSON.stringify(s));
+    renderCost(usage);
+}
+function renderCost(lastUsage) {
+    const el = $('cost-line');
+    if (!el) return;
+    const s = loadSession();
+    const now = lastUsage
+        ? `цей запит: ${lastUsage.input_tokens ?? '?'} вхід / ${lastUsage.output_tokens ?? '?'} вихід · `
+        : '';
+    el.textContent = `${now}за сесію: ${s.req} запит(ів), ` +
+                     `${s.inTok} вхідних / ${s.outTok} вихідних токенів`;
+}
+
+/* ── Референси ─────────────────────────────────────────────────────────────── */
+
+function renderRefs() {
+    const list = $('ref-list');
+    if (list) {
+        list.innerHTML = '';
+        references.forEach((r, i) => {
+            const chip = document.createElement('span');
+            chip.className = 'chip';
+            chip.textContent = r.name;
+            const x = document.createElement('button');
+            x.className = 'chip-x';
+            x.textContent = '✕';
+            x.addEventListener('click', () => { references.splice(i, 1); renderRefs(); refreshPlanLine(); });
+            chip.appendChild(x);
+            list.appendChild(chip);
+        });
+    }
+    const badge = $('ref-count');
+    if (badge) badge.textContent = references.length ? String(references.length) : '';
+}
+
+async function pickReferences() {
+    try {
+        const files = await uxpStorage.localFileSystem.getFileForOpening({
+            allowMultiple: true,
+            types: ['png', 'jpg', 'jpeg', 'webp'],
+        });
+        const arr = Array.isArray(files) ? files : (files ? [files] : []);
+        for (const f of arr) {
+            const buf = await f.read({ format: uxpStorage.formats.binary });
+            const lower = String(f.name).toLowerCase();
+            const type = lower.endsWith('.jpg') || lower.endsWith('.jpeg') ? 'image/jpeg'
+                       : lower.endsWith('.webp') ? 'image/webp' : 'image/png';
+            references.push({ name: f.name, blob: new Blob([buf], { type }) });
+        }
+        renderRefs();
+        refreshPlanLine();
+    } catch (e) {
+        if (e && /cancel/i.test(String(e.message))) return;
+        console.error('[ui] референси не додались:', e.message);
+        setStatus('Не вдалось додати референси: ' + e.message);
+    }
+}
+
+/* ── Пресети, історія, кеш ─────────────────────────────────────────────────── */
 
 function renderPresets() {
     const list = $('preset-list');
@@ -231,10 +374,12 @@ function renderHistory() {
         const txt = document.createElement('span');
         txt.className = 'history-prompt';
         txt.textContent = (h.prompt || '').slice(0, 90) || '(без промпту)';
-        txt.title = 'Підставити промпт';
+        txt.title = 'Підставити промпт і налаштування';
         txt.addEventListener('click', () => {
             const el = $('prompt-input');
             if (el) { el.value = h.prompt || ''; localStorage.setItem(LS.prompt, el.value); }
+            if (h.ctx) { lastRun = { ...h, references: [] }; setBusy(false); }
+            refreshPlanLine();
         });
         const del = document.createElement('button');
         del.className = 'icon-btn';
@@ -245,6 +390,37 @@ function renderHistory() {
     }
 }
 
+function renderCache() {
+    const list = $('cache-list');
+    const entries = cache.list();
+    if (list) {
+        list.innerHTML = '';
+        for (const e of entries) {
+            const row = document.createElement('div');
+            row.className = 'cache-row';
+            const txt = document.createElement('span');
+            txt.className = 'cache-info';
+            const m = e.meta || {};
+            const when = new Date(e.at).toLocaleTimeString();
+            txt.textContent = `${when} · ${(e.size / 1024).toFixed(0)} КБ · ` +
+                              `${(m.prompt || '').slice(0, 40) || '(без промпту)'}`;
+            const ins = document.createElement('button');
+            ins.className = 'mini-btn';
+            ins.textContent = 'Вставити';
+            ins.title = 'Вставити ще раз — без запиту до провайдера';
+            ins.addEventListener('click', () => reinsert(e.id));
+            const del = document.createElement('button');
+            del.className = 'icon-btn';
+            del.textContent = '✕';
+            del.addEventListener('click', async () => { await cache.remove(e.id); renderCache(); });
+            row.append(txt, ins, del);
+            list.appendChild(row);
+        }
+    }
+    const badge = $('cache-badge');
+    if (badge) badge.textContent = entries.length ? `${entries.length} · ${cache.human()}` : '';
+}
+
 function buildPrompt() {
     let text = ($('prompt-input')?.value || '').trim();
     for (const p of presetManager.getAll()) {
@@ -253,139 +429,353 @@ function buildPrompt() {
     return text.trim();
 }
 
+/* ── Вставка ───────────────────────────────────────────────────────────────── */
+
+/**
+ * Один шлях вставки для НОВОЇ генерації і для повтору з кешу — щоб маска,
+ * канал і залишок рахувались однаково і не розходились між двома копіями коду.
+ */
+async function insertImage(b64, ctx, target, feather) {
+    await core.executeAsModal(async () => {
+        const channelName = 'AiSel_' + Date.now();
+        let haveChannel = false;
+        try {
+            await batchPlay([{
+                _obj: 'duplicate',
+                _target: [{ _ref: 'channel', _enum: 'channel', _value: 'selection' }],
+                name: channelName,
+            }], {});
+            haveChannel = true;
+        } catch (e) {
+            // Немає активного виділення (типовий випадок повтору з кешу) —
+            // place.js побудує маску з прямокутника target.
+            console.log('[main] виділення в канал не збережено:', e.message);
+        }
+        try {
+            const report = await place.placeGeneratedSmartObject(
+                b64, ctx, haveChannel ? channelName : null, { maskFeather: feather });
+            const r = report.residual || {};
+            const el = $('residual-text');
+            if (el) {
+                const zero = [r.dx, r.dy, r.dw, r.dh].every(v => Math.abs(Number(v) || 0) < 0.01);
+                el.textContent = zero
+                    ? 'Вставлено точно: залишок 0'
+                    : `Залишок: dx=${r.dx} dy=${r.dy} dw=${r.dw} dh=${r.dh}`;
+                el.className = 'residual' + (zero ? ' ok' : ' warn');
+            }
+            console.log('[main] residual', JSON.stringify(report.residual),
+                report.warnings.length ? 'warnings: ' + report.warnings.join('; ') : '');
+        } finally {
+            if (haveChannel) {
+                try {
+                    await batchPlay([{ _obj: 'delete',
+                        _target: [{ _ref: 'channel', _name: channelName }] }], {});
+                } catch (e) {}
+            }
+        }
+    }, { commandName: 'Вставка згенерованого' });
+}
+
+async function reinsert(cacheId) {
+    if (busy) return;
+    const entry = cache.list().find(e => e.id === cacheId);
+    if (!entry) { setStatus('Запис зник із кешу'); renderCache(); return; }
+    const doc = app.activeDocument;
+    if (!doc) { await core.showAlert('Відкрийте документ.'); return; }
+
+    setBusy(true);
+    try {
+        setStatus('Читаю з кешу…');
+        const b64 = await cache.get(cacheId);
+        if (!b64) { setStatus('Файл кешу недоступний'); renderCache(); return; }
+        const m = entry.meta || {};
+        // Якщо є активне виділення — вставляємо в НЬОГО; інакше в збережену область.
+        const sel = await readSelectionBounds(doc).catch(() => null);
+        let ctx = m.ctx, target = m.target;
+        if (sel && sel.bounds) {
+            target = geometry.integerTarget(sel.bounds);
+            ctx = expandForContext(target, doc, Number(m.padPercent) || 0);
+            setStatus('Вставляю з кешу в поточне виділення…');
+        } else if (!ctx) {
+            setStatus('У кеші немає координат, а виділення відсутнє');
+            return;
+        } else {
+            setStatus('Вставляю з кешу в збережену область…');
+        }
+        showPreview(b64);
+        await insertImage(b64, ctx, target, readSettings().feather);
+        setStatus('Вставлено з кешу — без запиту до провайдера');
+    } catch (e) {
+        console.error('[main] повтор із кешу:', e);
+        setStatus('Не вдалось: ' + (e.message || e));
+    } finally {
+        setBusy(false);
+    }
+}
+
 /* ── Головний потік ────────────────────────────────────────────────────────── */
 
-async function onGenerate() {
+async function onGenerate(reuse) {
     if (busy) return;
 
     const doc = app.activeDocument;
     if (!doc) { await core.showAlert('Відкрийте документ.'); return; }
 
-    const prompt = buildPrompt();
-    if (!prompt) { await core.showAlert('Напишіть, що потрібно змінити.'); return; }
-
+    const s = readSettings();
     const provider = currentProvider();
     const model = localStorage.getItem(LS.model);
     if (!model) { await core.showAlert('Виберіть модель.'); return; }
+
+    const prompt = reuse && lastRun ? lastRun.prompt : buildPrompt();
+    if (!prompt) { await core.showAlert('Напишіть, що потрібно змінити.'); return; }
+
     const apiKey = await window.aiAuth.getKey(provider.keyName);
     if (!apiKey) { await core.showAlert(`Немає ключа ${provider.label}. Введіть його в розділі API.`); return; }
 
-    const quality = localStorage.getItem(LS.quality) || 'medium';
-    const n = Math.max(1, Math.min(4, parseInt($('variations-value')?.value || '1', 10) || 1));
-    const padPercent = Math.max(0, Math.min(50, parseInt($('context-pad')?.value || '15', 10) || 0));
-    const layerOnly = $('use-layer-only')?.checked === true;
-
     const docId = doc.id;
+    abortCtrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
     setBusy(true);
-    try {
-        // 1. Виділення
-        setStatus('Читаю виділення…');
-        const sel = await core.executeAsModal(() => readSelectionBounds(app.activeDocument),
-            { commandName: 'Читання виділення' });
-        if (!sel || !sel.bounds) { await core.showAlert('Виділіть прямокутну область.'); return; }
+    showPreview(null);
+    const el = $('residual-text');
+    if (el) el.textContent = '';
 
-        const target = geometry.integerTarget(sel.bounds);
-        if (target.w < 1 || target.h < 1) { await core.showAlert('Виділення порожнє.'); return; }
-        if (!sel.solid) {
-            console.warn('[main] виділення не прямокутне — геометрія рахується по його bounding box');
-            setStatus('Увага: виділення не прямокутне');
+    try {
+        /* 1. Область: або з живого виділення, або та сама, що минулого разу */
+        let target, ctx;
+        if (reuse && lastRun && lastRun.ctx) {
+            target = lastRun.target;
+            ctx = lastRun.ctx;
+            setStatus('Та сама область, що минулого разу…');
+        } else {
+            setStatus('Читаю виділення…');
+            const sel = await core.executeAsModal(() => readSelectionBounds(app.activeDocument),
+                { commandName: 'Читання виділення' });
+            if (!sel || !sel.bounds) { await core.showAlert('Виділіть прямокутну область.'); return; }
+            target = geometry.integerTarget(sel.bounds);
+            if (target.w < 1 || target.h < 1) { await core.showAlert('Виділення порожнє.'); return; }
+            if (!sel.solid) {
+                // Не проблема: маска шару робиться з каналу справжнього виділення,
+                // тому ласо й еліпс обрізаються правильно. Запит іде по bounding box.
+                console.log('[main] виділення не прямокутне — запит по bounding box, ' +
+                            'маска шару по фактичній формі');
+            }
+            ctx = expandForContext(target, doc, s.padPercent);
         }
 
-        const ctx = expandForContext(target, doc, padPercent);
-
-        // 2. Що просити в провайдера
+        /* 2. Що просити в провайдера */
         const caps = provider.capsFor(model);
-        const plan = geometry.planRequest(caps, ctx, quality);
+        const plan = geometry.planRequest(caps, ctx, s.quality);
         console.log('[main] план запиту:', JSON.stringify(plan), 'ctx', ctx.w + '×' + ctx.h);
 
-        // 3. Захоплення пікселів — документ користувача не змінюється
-        setStatus('Захоплюю область…');
-        const cap = await core.executeAsModal(() => capture.captureRegion(ctx, layerOnly),
-            { commandName: 'Захоплення області' });
-        console.log(`[main] захоплено: ${cap.docMode} ${cap.bpc}біт` +
-                    `${cap.viaDuplicate ? ' (через дублікат)' : ''}`);
+        /* 3. Захоплення пікселів — документ користувача не змінюється */
+        let cap = { blob: null, lossless: false };
+        if (!s.ignorePixels) {
+            setStatus('Захоплюю область…');
+            cap = await core.executeAsModal(() => capture.captureRegion(ctx, s.layerOnly, s.lossless),
+                { commandName: 'Захоплення області' });
+            console.log(`[main] захоплено: ${cap.docMode} ${cap.bpc}біт` +
+                        `${cap.viaDuplicate ? ' (через дублікат)' : ''}` +
+                        `${cap.lossless ? ' PNG' : ' JPEG'}`);
+        }
 
-        // Маска: показує моделі, що саме змінювати. Має сенс лише коли є контекст.
+        /* Request-маска: лише для провайдерів, що її приймають, і лише коли є
+           контекст навколо. Мʼякість — та сама, що в маски шару. */
         let maskBlob = null;
-        if (provider.supportsMask && padPercent > 0) {
+        if (provider.supportsMask && s.padPercent > 0 && cap.blob) {
             try {
                 const png = capture.buildRectMaskPng(ctx.w, ctx.h, {
                     left: target.left - ctx.left, top: target.top - ctx.top,
                     right: target.right - ctx.left, bottom: target.bottom - ctx.top,
-                });
+                }, s.feather);
                 maskBlob = new Blob([png], { type: 'image/png' });
-                console.log(`[main] маска ${ctx.w}×${ctx.h}: ${(png.length / 1024).toFixed(1)} КБ`);
+                console.log(`[main] маска ${ctx.w}×${ctx.h}, край ${s.feather} px: ` +
+                            `${(png.length / 1024).toFixed(1)} КБ`);
             } catch (e) { console.warn('[main] маска не побудована:', e.message); }
         }
 
-        // 4. Генерація — поза модальним контекстом, щоб Photoshop не блокувався
+        /* 4. Генерація — поза модальним контекстом, щоб Photoshop не блокувався */
         setStatus('Генерація…');
-        const images = await provider.generate({
-            apiKey, model, prompt,
-            imageBlob: cap.blob, maskBlob, plan, n,
-            onProgress: (cur, total, status) => setStatus(`Генерація ${cur}/${total} — ${status}`),
-        });
-        if (!images.length) { await core.showAlert('Провайдер не повернув зображень.'); return; }
+        const wantPreview = s.livePreview && provider.supportsStream !== false;
+        const refBlobs = (provider.supportsReferences !== false)
+            ? references.map(r => r.blob) : [];
 
-        // 5. Вставка
+        const res = await provider.generate({
+            apiKey, model, prompt,
+            imageBlob: cap.blob, maskBlob,
+            references: refBlobs,
+            plan,
+            background: s.transparent && provider.supportsTransparent !== false ? 'transparent' : null,
+            ignorePixels: s.ignorePixels,
+            signal: abortCtrl ? abortCtrl.signal : undefined,
+            onPartial: wantPreview ? (b64, idx) => {
+                showPreview(b64);
+                setStatus(`Генерація… проміжний кадр ${(idx ?? 0) + 1}`);
+            } : null,
+            onProgress: st => setStatus(st),
+        });
+
+        const images = (res && res.images) || [];
+        if (!images.length) { await core.showAlert('Провайдер не повернув зображень.'); return; }
+        showPreview(images[0]);
+        addUsage(res.usage);
+
+        /* 5. Вставка */
         if (!app.activeDocument || app.activeDocument.id !== docId) {
             await core.showAlert('Активний документ змінився під час генерації — вставку скасовано.');
             return;
         }
         setStatus('Вставляю…');
-        await core.executeAsModal(async () => {
-            const channelName = 'AiSel_' + Date.now();
-            let haveChannel = false;
-            try {
-                await batchPlay([{
-                    _obj: 'duplicate',
-                    _target: [{ _ref: 'channel', _enum: 'channel', _value: 'selection' }],
-                    name: channelName,
-                }], {});
-                haveChannel = true;
-            } catch (e) { console.warn('[main] виділення не збережено в канал:', e.message); }
+        await insertImage(images[0], ctx, target, s.feather);
 
-            try {
-                for (let i = 0; i < images.length; i++) {
-                    const report = await place.placeGeneratedSmartObject(
-                        images[i], ctx, haveChannel ? channelName : null);
-                    console.log(`[main] вставка ${i + 1}/${images.length}:`,
-                        'residual', JSON.stringify(report.residual),
-                        report.warnings.length ? 'warnings: ' + report.warnings.join('; ') : '');
-                }
-            } finally {
-                if (haveChannel) {
-                    try {
-                        await batchPlay([{ _obj: 'delete',
-                            _target: [{ _ref: 'channel', _name: channelName }] }], {});
-                    } catch (e) {}
-                }
-            }
-        }, { commandName: 'Вставка згенерованого' });
+        /* 6. Пам'ять про запуск: кеш + історія + кнопка «Перегенерувати» */
+        const meta = { prompt, provider: provider.id, model, ctx, target,
+                       padPercent: s.padPercent, quality: s.quality };
+        const cacheId = await cache.save(images[0], meta);
+        renderCache();
 
-        historyManager.add({
-            prompt, model, provider: provider.id,
-            settings: { quality, n, padPercent, layerOnly },
-        });
+        lastRun = { ...meta };
+        historyManager.add({ ...meta, cacheId, settings: s });
         renderHistory();
-        setStatus(`Готово: ${images.length} шар${images.length > 1 ? 'и' : ''}`);
+        setStatus('Готово');
 
     } catch (e) {
-        console.error('[main]', e);
-        await core.showAlert(`Не вдалось:\n${e && e.message ? e.message : e}`);
-        setStatus('Помилка');
+        if (e && e.cancelled) {
+            setStatus('Скасовано');
+        } else {
+            console.error('[main]', e);
+            await core.showAlert(`Не вдалось:\n${e && e.message ? e.message : e}`);
+            setStatus('Помилка');
+        }
     } finally {
+        abortCtrl = null;
         setBusy(false);
     }
 }
 
 /* ── Запуск ────────────────────────────────────────────────────────────────── */
 
+/**
+ * Ініціалізація UI. Кожен блок в окремому try: у старому плагіні
+ * ReferenceError у initializeModels обривав ініціалізацію, і разом із ним
+ * тихо вмирали refine-пікер та вкладка чату.
+ */
+async function initUI() {
+    try {
+        const list = providers.list();
+        const saved = localStorage.getItem(LS.provider) || list[0].id;
+        localStorage.setItem(LS.provider, saved);
+        fillPicker('provider-select', list.map(p => ({ value: p.id, label: p.label })), saved);
+        const picker = $('provider-select');
+        if (picker) picker.addEventListener('change', async e => {
+            localStorage.setItem(LS.provider, e.target.value);
+            localStorage.removeItem(LS.model);
+            await window.aiAuth.refreshAuthUI();
+            await refreshModels();
+            applyProviderCapabilities();
+            refreshPlanLine();
+        });
+    } catch (e) { console.error('[ui] провайдери:', e.message); }
+
+    try { await refreshModels(); } catch (e) { console.error('[ui] моделі:', e.message); }
+
+    try {
+        const picker = $('model-select');
+        if (picker) picker.addEventListener('change', e => {
+            localStorage.setItem(LS.model, e.target.value);
+            refreshPlanLine();
+        });
+    } catch (e) { console.error('[ui] модель:', e.message); }
+
+    try { initQuality(); } catch (e) { console.error('[ui] якість:', e.message); }
+    try { applyProviderCapabilities(); } catch (e) { console.error('[ui] можливості:', e.message); }
+
+    try {
+        const bind = (id, key, def, prop = 'value') => {
+            const el = $(id);
+            if (!el) return;
+            const saved = localStorage.getItem(key);
+            if (saved !== null) el[prop] = prop === 'checked' ? saved === 'true' : saved;
+            else if (def !== undefined) el[prop] = def;
+            el.addEventListener('change', () => {
+                localStorage.setItem(key, String(prop === 'checked' ? el.checked : el.value));
+                refreshPlanLine();
+            });
+        };
+        bind('prompt-input', LS.prompt, '');
+        bind('context-pad', LS.pad, '15');
+        bind('edge-feather', LS.feather, '8');
+        bind('use-layer-only', LS.layerOnly, false, 'checked');
+        bind('lossless-input', LS.lossless, true, 'checked');
+        bind('transparent-bg', LS.transparent, false, 'checked');
+        bind('ignore-pixels', LS.ignorePixels, false, 'checked');
+        bind('live-preview', LS.preview, true, 'checked');
+        const prompt = $('prompt-input');
+        if (prompt) prompt.addEventListener('input', () => localStorage.setItem(LS.prompt, prompt.value));
+    } catch (e) { console.error('[ui] налаштування:', e.message); }
+
+    try { renderPresets(); } catch (e) { console.error('[ui] пресети:', e.message); }
+    try { await historyManager.load(); renderHistory(); } catch (e) { console.error('[ui] історія:', e.message); }
+    try { renderCache(); } catch (e) { console.error('[ui] кеш:', e.message); }
+    try { renderRefs(); renderCost(null); } catch (e) {}
+    try { await refreshPlanLine(); } catch (e) {}
+}
+
+/**
+ * Слухач подій Photoshop, щоб рядок «що буде запрошено» жив сам.
+ * Форма API мінялась (масив рядків → масив об'єктів), тому пробуємо обидві й
+ * тихо обходимось без цього, якщо жодна не пройшла: рядок тоді оновлюється на
+ * зміну налаштувань і при кліку на панель.
+ */
+function watchSelection() {
+    const events = ['set', 'historyStateChanged', 'select'];
+    const cb = () => schedulePlanLine();
+    try {
+        action.addNotificationListener(events.map(event => ({ event })), cb);
+        return;
+    } catch (e) { /* друга форма нижче */ }
+    try {
+        action.addNotificationListener(events, cb);
+    } catch (e) {
+        console.log('[ui] подій виділення не слухаю:', e.message);
+    }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     initUI();
+    watchSelection();
 
     const btn = $('generate-btn');
-    if (btn) btn.addEventListener('click', onGenerate);
+    if (btn) btn.addEventListener('click', () => onGenerate(false));
+
+    const regen = $('regen-btn');
+    if (regen) regen.addEventListener('click', () => onGenerate(true));
+
+    const cancel = $('cancel-btn');
+    if (cancel) cancel.addEventListener('click', () => {
+        if (abortCtrl) { abortCtrl.abort(); setStatus('Скасовую…'); }
+    });
+
+    // Cmd+Enter / Ctrl+Enter — генерувати; Esc — скасувати
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault();
+            onGenerate(false);
+        } else if (e.key === 'Escape' && busy && abortCtrl) {
+            e.preventDefault();
+            abortCtrl.abort();
+            setStatus('Скасовую…');
+        }
+    });
+
+    const addRef = $('add-ref-btn');
+    if (addRef) addRef.addEventListener('click', pickReferences);
+    const clearRef = $('clear-ref-btn');
+    if (clearRef) clearRef.addEventListener('click', () => { references = []; renderRefs(); refreshPlanLine(); });
+
+    const clearCache = $('clear-cache-btn');
+    if (clearCache) clearCache.addEventListener('click', async () => {
+        await cache.clear(); renderCache(); setStatus('Кеш очищено');
+    });
 
     const addPreset = $('add-preset-btn');
     if (addPreset) addPreset.addEventListener('click', () => {
@@ -399,7 +789,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Секції, що згортаються
-    for (const [head, body] of [['preset-header', 'preset-body'], ['history-header', 'history-body']]) {
+    for (const [head, body] of [['ref-header', 'ref-body'], ['cache-header', 'cache-body'],
+                                ['preset-header', 'preset-body'], ['history-header', 'history-body']]) {
         const h = $(head), b = $(body);
         if (h && b) h.addEventListener('click', () => b.classList.toggle('hidden'));
     }
