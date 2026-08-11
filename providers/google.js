@@ -18,6 +18,7 @@
  * ========================================================================== */
 
 const { blobToBase64, request, withRetry, HttpError } = require('./http.js');
+const googleI18n = require('../i18n.js');
 
 const BASE = 'https://generativelanguage.googleapis.com/v1beta/';
 
@@ -82,26 +83,22 @@ function capsFor(modelId) {
 function describeRefusal(json) {
     const fb = json && json.promptFeedback;
     if (fb && fb.blockReason) {
-        return `Gemini заблокував запит: ${fb.blockReason}` +
-               (fb.blockReasonMessage ? ` — ${fb.blockReasonMessage}` : '');
+        return googleI18n.t('provider.googleBlocked', {
+            reason: `${fb.blockReason}${fb.blockReasonMessage ? ` — ${fb.blockReasonMessage}` : ''}`,
+        });
     }
     const cand = json && json.candidates && json.candidates[0];
     if (cand && cand.finishReason && cand.finishReason !== 'STOP') {
-        const map = {
-            SAFETY: 'спрацював фільтр безпеки',
-            RECITATION: 'відповідь визнано цитуванням',
-            PROHIBITED_CONTENT: 'заборонений вміст',
-            IMAGE_SAFETY: 'фільтр безпеки для зображень',
-            MAX_TOKENS: 'вичерпано ліміт токенів',
-        };
-        return `Gemini не завершив генерацію (${cand.finishReason}` +
-               (map[cand.finishReason] ? `: ${map[cand.finishReason]}` : '') + ')';
+        return googleI18n.t('provider.googleFinish', {
+            reason: cand.finishReason,
+            detail: '',
+        });
     }
     // інколи модель відповідає текстом замість картинки — покажемо його
     const parts = (cand && cand.content && cand.content.parts) || [];
     const text = parts.map(p => p.text).filter(Boolean).join(' ').trim();
-    if (text) return `Gemini відповів текстом замість зображення: ${text.slice(0, 300)}`;
-    return 'Gemini не повернув зображення';
+    if (text) return googleI18n.t('provider.googleText', { text: text.slice(0, 300) });
+    return googleI18n.t('provider.googleNoImage');
 }
 
 function extractImage(json) {
@@ -189,16 +186,16 @@ async function callWithFallback(args) {
 
 async function generate({ apiKey, model, prompt, imageBlob, references, plan,
                           ignorePixels, signal, onProgress }) {
-    if (!apiKey) throw new Error('Немає ключа Google — увійдіть у розділі API');
-    if (!prompt || !prompt.trim()) throw new Error('Порожній промпт');
+    if (!apiKey) throw new Error(googleI18n.t('provider.noKey', { provider: 'Google' }));
+    if (!prompt || !prompt.trim()) throw new Error(googleI18n.t('provider.emptyPrompt'));
 
-    if (onProgress) onProgress('Генерація…');
+    if (onProgress) onProgress(googleI18n.t('provider.generating'));
     const res = await withRetry(() => callWithFallback({
         apiKey, model, prompt,
         imageBlob: ignorePixels ? null : imageBlob,
         references, plan, signal,
     }), { signal });
-    if (onProgress) onProgress('Готово');
+    if (onProgress) onProgress(googleI18n.t('provider.done'));
     return res;
 }
 

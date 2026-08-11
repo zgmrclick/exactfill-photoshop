@@ -1,173 +1,201 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="utf-8">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-<!-- ── Ключ API ─────────────────────────────────────────────────────────── -->
+<header class="brand-bar">
+    <img src="icons/exactfill.svg" class="brand-icon" alt="">
+    <div class="brand-copy">
+        <strong>ExactFill</strong>
+        <span data-i18n="brand.tagline">Exact AI edits. Native Photoshop layers.</span>
+    </div>
+    <span id="app-version" class="version"></span>
+</header>
+
 <div id="auth" class="section hidden">
     <p class="hint">
-        Потрібен ключ API для <b id="auth-provider-label">провайдера</b>.
-        <a href="#" id="open-key-page">Отримати ключ</a>
+        <span data-i18n="auth.needKey">An API key is required for</span>
+        <b id="auth-provider-label">provider</b>.
+        <a href="#" id="open-key-page" data-i18n="auth.getKey">Get a key</a>
     </p>
-    <sp-textfield id="api-key-input" type="password" placeholder="Вставте ключ">
-    </sp-textfield>
-    <sp-button id="submit-auth" variant="cta" size="s">Зберегти ключ</sp-button>
+    <sp-textfield id="api-key-input" type="password" placeholder="Paste API key"
+                  data-i18n-placeholder="auth.placeholder"></sp-textfield>
+    <sp-button id="submit-auth" variant="cta" size="s" data-i18n="auth.save">Save key</sp-button>
     <p id="auth-status" class="status"></p>
 </div>
 
-<!-- ── Основна панель ───────────────────────────────────────────────────── -->
 <div id="main" class="hidden">
-
     <textarea id="prompt-input" rows="3"
-              placeholder="Що змінити у виділеній області?  (Cmd+Enter — генерувати)"></textarea>
+              placeholder="What should change in the selected area?  (Cmd/Ctrl+Enter to generate)"
+              data-i18n-placeholder="prompt.placeholder"></textarea>
 
     <div class="row">
-        <label class="lbl">Провайдер</label>
+        <label class="lbl" data-i18n="field.provider">Provider</label>
         <sp-picker id="provider-select" size="s" class="grow"></sp-picker>
     </div>
 
     <div class="row">
-        <label class="lbl">Модель</label>
+        <label class="lbl" data-i18n="field.model">Model</label>
         <sp-picker id="model-select" size="s" class="grow"></sp-picker>
     </div>
 
     <div class="field">
-        <label class="lbl">Якість</label>
+        <label class="lbl" data-i18n="field.quality">Quality</label>
         <div id="quality-toggle" class="seg"></div>
     </div>
 
     <p id="plan-line" class="plan"></p>
 
     <div class="row gen-row">
-        <sp-button id="generate-btn" variant="cta" class="grow">Генерувати</sp-button>
-        <sp-button id="cancel-btn" size="s" variant="secondary" class="hidden">Скасувати</sp-button>
+        <sp-button id="generate-btn" variant="cta" class="grow" data-i18n="action.generate">Generate</sp-button>
+        <sp-button id="cancel-btn" size="s" variant="secondary" class="hidden"
+                   data-i18n="action.cancel">Cancel</sp-button>
         <div id="spinner" class="spinner hidden"></div>
     </div>
     <div class="row">
         <sp-button id="regen-btn" size="s" quiet class="grow" disabled
-            title="Той самий промпт і та сама область — без нового виділення">Перегенерувати</sp-button>
+            title="Same prompt and area, without making a new selection"
+            data-i18n="action.regenerate" data-i18n-title="action.regenerateTitle">Regenerate</sp-button>
     </div>
 
     <p id="status-text" class="status"></p>
     <p id="residual-text" class="residual"></p>
 
     <div id="preview-wrap" class="preview hidden">
-        <img id="preview-img" alt="прев'ю">
+        <img id="preview-img" alt="Preview">
     </div>
 
     <p id="cost-line" class="cost hidden"></p>
 
-    <!-- Постійна статистика: localStorage переживає закриття панелі й Photoshop. -->
     <div class="section collapsible">
         <div id="usage-header" class="head">
-            <span>Статистика витрат</span><span id="usage-badge" class="badge hidden"></span>
+            <span data-i18n="usage.title">API cost statistics</span>
+            <span id="usage-badge" class="badge hidden"></span>
         </div>
         <div id="usage-body" class="body hidden">
             <div id="usage-summary" class="usage-summary"></div>
-            <p class="usage-subhead">Останні запити</p>
+            <p class="usage-subhead" data-i18n="usage.recent">Recent requests</p>
             <div id="usage-list"></div>
-            <p class="hint usage-note">Суми — оцінка в USD за стандартним API-прайсом,
-               перевіреним 11.08.2026. Фактичний білінг може трохи відрізнятися через
-               кешування та округлення провайдера. Зберігаються останні 500 запитів,
-               але не довше року.</p>
-            <sp-button id="clear-usage-btn" size="s" quiet>Очистити статистику</sp-button>
+            <p class="hint usage-note" data-i18n="usage.note">Amounts are USD estimates based on standard API pricing.</p>
+            <sp-button id="clear-usage-btn" size="s" quiet data-i18n="usage.clear">Clear statistics</sp-button>
         </div>
     </div>
 
-    <!-- Додаткові налаштування. Розгорнуто за замовчуванням, бо перевірка
-         рендеру повзунків міряє offsetHeight, а він нульовий у схованому блоці. -->
     <div class="section collapsible">
-        <div id="opts-header" class="head"><span>Налаштування області та краю</span></div>
+        <div id="opts-header" class="head"><span data-i18n="options.title">Area and edge settings</span></div>
         <div id="opts-body" class="body">
-            <!-- sp-slider, а не sp-number-field: останнього в переліку віджетів UXP
-                 немає, і він молча не малюється — лишались самі підписи. -->
             <div class="field">
                 <sp-slider id="context-pad" min="0" max="50" step="5" value="15" value-label="%"
-                           title="Скільки оточення надіслати моделі як контекст">
-                    <sp-label slot="label">Контекст навколо</sp-label>
+                           title="How much surrounding content to send to the model"
+                           data-i18n-title="options.contextTitle">
+                    <sp-label slot="label" data-i18n="options.context">Surrounding context</sp-label>
                 </sp-slider>
             </div>
 
             <div class="field">
                 <sp-slider id="edge-feather" min="0" max="256" step="2" value="16" value-label=" px"
-                           title="Ширина плавного переходу всередині області; за її межею AI-шар повністю прихований">
-                    <sp-label slot="label">Змішування краю</sp-label>
+                           title="Transition width inside the selection; the AI layer is hidden outside it"
+                           data-i18n-title="options.edgeTitle">
+                    <sp-label slot="label" data-i18n="options.edge">Edge blend</sp-label>
                 </sp-slider>
             </div>
 
             <div class="checks">
-                <sp-checkbox id="use-layer-only" size="s"
-                    title="Надіслати лише активний шар замість зведеного зображення">Лише активний шар</sp-checkbox>
-                <sp-checkbox id="lossless-input" size="s" checked
-                    title="PNG замість JPEG: без артефактів на дрібному шрифті. Вище 2 МП автоматично JPEG">Вхід без втрат</sp-checkbox>
-                <sp-checkbox id="transparent-bg" size="s"
-                    title="background=transparent — лише OpenAI">Прозорий фон</sp-checkbox>
-                <sp-checkbox id="ignore-pixels" size="s"
-                    title="Генерувати з нуля, не дивлячись на наявні пікселі">Ігнорувати пікселі</sp-checkbox>
-                <sp-checkbox id="live-preview" size="s" checked
-                    title="Проміжні кадри під час генерації — лише OpenAI">Живий прев'ю</sp-checkbox>
+                <sp-checkbox id="use-layer-only" size="s" title="Send only the active layer instead of the visible composite"
+                    data-i18n="options.layerOnly" data-i18n-title="options.layerOnlyTitle">Active layer only</sp-checkbox>
+                <sp-checkbox id="lossless-input" size="s" checked title="PNG instead of JPEG. Areas above 2 MP automatically use JPEG"
+                    data-i18n="options.lossless" data-i18n-title="options.losslessTitle">Lossless input</sp-checkbox>
+                <sp-checkbox id="transparent-bg" size="s" title="background=transparent — OpenAI only"
+                    data-i18n="options.transparent" data-i18n-title="options.transparentTitle">Transparent background</sp-checkbox>
+                <sp-checkbox id="ignore-pixels" size="s" title="Generate from scratch without using the current pixels"
+                    data-i18n="options.ignorePixels" data-i18n-title="options.ignorePixelsTitle">Ignore pixels</sp-checkbox>
+                <sp-checkbox id="live-preview" size="s" checked title="Intermediate frames during generation — OpenAI only"
+                    data-i18n="options.livePreview" data-i18n-title="options.livePreviewTitle">Live preview</sp-checkbox>
             </div>
         </div>
     </div>
 
-    <!-- Референси -->
     <div class="section collapsible">
         <div id="ref-header" class="head">
-            <span>Референсні зображення</span><span id="ref-count" class="badge hidden"></span>
+            <span data-i18n="refs.title">Reference images</span><span id="ref-count" class="badge hidden"></span>
         </div>
         <div id="ref-body" class="body hidden">
-            <p class="hint">Приклади стилю або товару. Перше зображення — завжди ваша виділена
-               область, референси йдуть після неї.</p>
+            <p class="hint" data-i18n="refs.hint">Style or product references. Your selected area is always first.</p>
             <div id="ref-list" class="chips"></div>
             <div class="row">
-                <sp-button id="add-ref-btn" size="s">Додати файли…</sp-button>
-                <sp-button id="clear-ref-btn" size="s" quiet>Очистити</sp-button>
+                <sp-button id="add-ref-btn" size="s" data-i18n="refs.add">Add files…</sp-button>
+                <sp-button id="clear-ref-btn" size="s" quiet data-i18n="common.clear">Clear</sp-button>
             </div>
         </div>
     </div>
 
-    <!-- Кеш результатів -->
     <div class="section collapsible">
         <div id="cache-header" class="head">
-            <span>Кеш результатів</span><span id="cache-badge" class="badge hidden"></span>
+            <span data-i18n="cache.title">Result cache</span><span id="cache-badge" class="badge hidden"></span>
         </div>
         <div id="cache-body" class="body hidden">
-            <p class="hint">Останні результати лежать на диску. Повторна вставка з кешу —
-               без запиту до провайдера, тобто безкоштовно.</p>
+            <p class="hint" data-i18n="cache.hint">Recent results are stored locally.</p>
             <div id="cache-list"></div>
-            <sp-button id="clear-cache-btn" size="s" quiet>Очистити кеш</sp-button>
+            <sp-button id="clear-cache-btn" size="s" quiet data-i18n="cache.clear">Clear cache</sp-button>
         </div>
     </div>
 
-    <!-- Пресети -->
     <div class="section collapsible">
         <div id="preset-header" class="head">
-            <span>Пресети промпту</span><span id="preset-count" class="badge hidden"></span>
+            <span data-i18n="presets.title">Prompt presets</span><span id="preset-count" class="badge hidden"></span>
         </div>
         <div id="preset-body" class="body hidden">
             <div id="preset-list"></div>
-            <sp-textfield id="new-preset-name" placeholder="Назва"></sp-textfield>
-            <sp-textfield id="new-preset-content" placeholder="Текст, що додається до промпту"></sp-textfield>
-            <sp-button id="add-preset-btn" size="s">Додати пресет</sp-button>
+            <sp-textfield id="new-preset-name" placeholder="Name" data-i18n-placeholder="presets.name"></sp-textfield>
+            <sp-textfield id="new-preset-content" placeholder="Text appended to the prompt"
+                          data-i18n-placeholder="presets.content"></sp-textfield>
+            <sp-button id="add-preset-btn" size="s" data-i18n="presets.add">Add preset</sp-button>
         </div>
     </div>
 
-    <!-- Історія -->
     <div class="section collapsible">
-        <div id="history-header" class="head"><span>Історія</span></div>
-        <div id="history-body" class="body hidden">
-            <div id="history-list"></div>
+        <div id="history-header" class="head"><span data-i18n="history.title">History</span></div>
+        <div id="history-body" class="body hidden"><div id="history-list"></div></div>
+    </div>
+
+    <div class="section collapsible">
+        <div id="report-header" class="head"><span data-i18n="report.title">Report a bug</span></div>
+        <div id="report-body" class="body hidden">
+            <p class="hint" data-i18n="report.hint">Describe what happened. ExactFill will open a prefilled GitHub issue.</p>
+            <textarea id="report-summary" rows="2" placeholder="Short summary"
+                      data-i18n-placeholder="report.summary"></textarea>
+            <textarea id="report-details" rows="4" placeholder="What happened? What did you expect?"
+                      data-i18n-placeholder="report.details"></textarea>
+            <sp-checkbox id="report-diagnostics" size="s" checked
+                         data-i18n="report.diagnostics">Include safe diagnostics</sp-checkbox>
+            <sp-button id="report-submit" size="s" data-i18n="report.submit">Open GitHub issue</sp-button>
+            <p id="report-status" class="status"></p>
         </div>
     </div>
 
-    <div class="section">
-        <sp-button id="signout" size="s" quiet>Змінити ключ</sp-button>
+    <div class="section public-footer">
+        <div class="row footer-actions">
+            <label for="language-select" class="lbl" data-i18n="language.label">Language</label>
+            <select id="language-select" class="language-select">
+                <option value="en">English</option>
+                <option value="uk">Українська</option>
+            </select>
+        </div>
+        <p class="hint privacy-note" data-i18n="privacy.note">Keys stay in Photoshop secure storage.</p>
+        <div class="row footer-actions">
+            <sp-button id="privacy-btn" size="s" quiet data-i18n="privacy.open">Privacy</sp-button>
+            <sp-button id="support-btn" size="s" quiet disabled
+                       data-i18n="support.comingSoon">Support ExactFill — coming soon</sp-button>
+            <sp-button id="signout" size="s" quiet data-i18n="auth.change">Change key</sp-button>
+        </div>
     </div>
 </div>
 
+<script src="i18n.js"></script>
+<script src="public-ui.js"></script>
 <script src="auth.js"></script>
 <script src="main.js"></script>
 </body>

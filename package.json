@@ -1,7 +1,15 @@
 {
-  "name": "ai-image-ps",
-  "version": "1.1.0",
-  "description": "Один UXP-плагін Photoshop: виділення + промпт -> Smart Object точно на місці. OpenAI та Google Gemini.",
+  "name": "exactfill-photoshop",
+  "version": "1.2.0",
+  "description": "Free open-source Photoshop plugin for exact AI edits with your own OpenAI and Google Gemini API keys.",
   "main": "index.html",
+  "scripts": {
+    "check": "for f in *.js providers/*.js test/*.js; do node --check \"$f\" || exit 1; done",
+    "test": "node --test test/*.test.js && npm run check",
+    "build": "bash scripts/build-release.sh"
+  },
+  "license": "MIT",
+  "author": "Havryil Zahorodnii",
+  "repository": "https://github.com/zgmrclick/exactfill-photoshop",
   "private": true
 }

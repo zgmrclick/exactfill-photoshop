@@ -29,6 +29,7 @@ const uxpStorage = require('uxp').storage;
 const { withPixels } = require('./place.js');
 const { buildRectMaskPng, encodePng } = require('./png.js');
 const { isolateLayerTree } = require('./layer-tree.js');
+const captureI18n = require('./i18n.js');
 
 /** Режими, які imaging API обслуговує безпечно. Решта — через дублікат. */
 const SAFE_MODES = ['RGBColorMode', 'grayscaleMode', 'GrayscaleMode', 'labColorMode', 'LabColorMode'];
@@ -118,7 +119,7 @@ async function imageDataToPngBlob(imageData) {
             rgb[i * 3] = v; rgb[i * 3 + 1] = v; rgb[i * 3 + 2] = v;
         }
     } else {
-        throw new Error(`Неочікувана кількість компонент: ${comps}`);
+        throw new Error(captureI18n.t('capture.components', { count: comps }));
     }
     const t0 = Date.now();
     const png = encodePng(rgb, w, h, 3);
@@ -164,7 +165,7 @@ async function captureViaDuplicate(bounds, useLayerOnly, lossless) {
             // вкладений у групу. Ізолюємо його гілку видимістю на копії.
             const keep = dup.activeLayers[0];
             if (!keep || !isolateLayerTree(dup.layers, keep.id)) {
-                throw new Error('Не вдалося знайти активний шар у копії документа');
+                throw new Error(captureI18n.t('capture.layerMissing'));
             }
         }
 
@@ -173,8 +174,7 @@ async function captureViaDuplicate(bounds, useLayerOnly, lossless) {
         // документ користувача — той самий необоротний CMYK→RGB, від якого
         // тікали. Тому перевіряємо явно і краще відмовимось, ніж зіпсуємо макет.
         if (!app.activeDocument || app.activeDocument.id !== dup.id) {
-            throw new Error('Копія документа не стала активною — конвертацію скасовано, ' +
-                            'щоб не зачепити оригінал');
+            throw new Error(captureI18n.t('capture.copyInactive'));
         }
         const onDup = [{ _ref: 'document', _id: dup.id }];
 
@@ -234,13 +234,15 @@ async function captureViaDuplicate(bounds, useLayerOnly, lossless) {
  */
 async function captureRegion(bounds, useLayerOnly = false, wantLossless = true) {
     const doc = app.activeDocument;
-    if (!doc) throw new Error('Немає активного документа');
+    if (!doc) throw new Error(captureI18n.t('capture.noDocument'));
 
     const docMode = String(doc.mode);
     const bpc = doc.bitsPerChannel;
     const w = bounds.right - bounds.left;
     const h = bounds.bottom - bounds.top;
-    if (w < 1 || h < 1) throw new Error(`Порожня область захоплення ${w}×${h}`);
+    if (w < 1 || h < 1) {
+        throw new Error(captureI18n.t('capture.emptyArea', { width: w, height: h }));
+    }
 
     let lossless = wantLossless;
     if (lossless && w * h > LOSSLESS_MAX_PX) {

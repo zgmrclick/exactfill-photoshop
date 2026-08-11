@@ -9,10 +9,15 @@ set -e
 
 DEST="/Applications/Adobe Photoshop 2026/Plug-ins/AiImagePS"
 SRC="$(cd "$(dirname "$0")" && pwd)"
-EXCL=(--exclude '.git' --exclude 'test' --exclude 'CONTRACTS.md'
-      --exclude 'deploy.sh' --exclude 'deploy.ps1' --exclude 'Install AI Image.cmd'
-      --exclude 'README.md' --exclude 'package.json' --exclude '.gitignore'
-      --exclude 'node_modules' --exclude 'verify' --exclude '.DS_Store')
+EXCL=(--include 'icons/exactfill.svg' --exclude 'icons/*'
+      --exclude '.git' --exclude 'test' --exclude 'CONTRACTS.md'
+      --exclude 'deploy.sh' --exclude 'INSTALL.txt'
+      --exclude 'README.md' --exclude 'README.uk.md' --exclude 'LICENSE'
+      --exclude 'PRIVACY.md' --exclude 'SUPPORT.md' --exclude 'SECURITY.md'
+      --exclude 'CONTRIBUTING.md' --exclude 'CHANGELOG.md'
+      --exclude 'package.json' --exclude '.gitignore' --exclude '.github'
+      --exclude 'scripts' --exclude 'dist' --exclude 'node_modules'
+      --exclude 'verify' --exclude 'verify-assumptions.psjs' --exclude '.DS_Store')
 
 if [ -d "$DEST" ] && [ -w "$DEST" ]; then
     rsync -a --delete --delete-excluded "${EXCL[@]}" "$SRC/" "$DEST/"
@@ -25,4 +30,4 @@ else
     echo "  Наступні оновлення пароля вже не потребують."
 fi
 
-echo "  Перезапустіть Photoshop → Plugins → AI Image"
+echo "  Перезапустіть Photoshop → Plugins → ExactFill"

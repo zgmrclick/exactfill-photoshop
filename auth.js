@@ -10,6 +10,7 @@
 
 const { shell, storage } = require('uxp');
 const secureStore = storage.secureStorage;
+const authI18n = require('./i18n.js');
 
 /**
  * secureStorage віддає ключ як Uint8Array, а не рядок — звідси
@@ -69,7 +70,7 @@ async function refreshAuthUI() {
     if (main) main.classList.toggle('hidden', !ok);
     if (signout) {
         signout.classList.toggle('hidden', !ok);
-        signout.textContent = 'Змінити ключ';
+        signout.textContent = authI18n.t('auth.change');
     }
 
     const providers = require('./providers/index.js');
@@ -91,7 +92,9 @@ async function submitAuth() {
     } catch (e) {
         console.error('[auth] ключ не збережено:', e && e.message);
         const status = document.getElementById('auth-status');
-        if (status) status.textContent = `Не вдалося зберегти ключ: ${e && e.message ? e.message : e}`;
+        if (status) status.textContent = authI18n.t('auth.saveError', {
+            error: e && e.message ? e.message : e,
+        });
     }
 }
 
@@ -107,7 +110,7 @@ async function toggleAuthEdit() {
     } else {
         main.classList.add('hidden');
         auth.classList.remove('hidden');
-        btn.textContent = 'Залишити ключ';
+        btn.textContent = authI18n.t('auth.keep');
         const input = document.getElementById('api-key-input');
         if (input) input.value = '';
     }
@@ -129,15 +132,19 @@ document.addEventListener('DOMContentLoaded', () => {
             const url = link.dataset.url;
             if (!url) return;
             try {
-                await shell.openExternal(url, 'Відкрити офіційну сторінку для створення API-ключа');
+                await shell.openExternal(url, authI18n.t('auth.openConsent'));
             } catch (err) {
                 console.error('[auth] посилання не відкрилось:', err && err.message);
                 const status = document.getElementById('auth-status');
-                if (status) status.textContent = `Не вдалося відкрити браузер: ${err && err.message ? err.message : err}`;
+                if (status) status.textContent = authI18n.t('auth.openError', {
+                    error: err && err.message ? err.message : err,
+                });
             }
         });
     }
 });
+
+document.addEventListener('exactfill:localechange', () => refreshAuthUI());
 
 // main.js викликає refreshAuthUI при зміні провайдера — панель мусить
 // перемкнутися на потрібний ключ

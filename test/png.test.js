@@ -1,5 +1,5 @@
 const zlib = require('zlib');
-const P = require('/Users/zg.mrclick/ai-image-ps/png.js');
+const P = require('../png.js');
 
 // 1. deflate round-trip на різних даних
 console.log('=== deflate round-trip ===');

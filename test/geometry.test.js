@@ -1,4 +1,4 @@
-const G = require('/Users/zg.mrclick/ai-image-ps/geometry.js');
+const G = require('../geometry.js');
 const CAPS2 = {arbitrary:true, step:16, maxEdge:3840, minPx:655360, maxPx:8294400, maxRatio:3};
 console.log('=== exactSize + planFrame, quality=medium ===');
 const cases=[['парне 200x200',{left:100,top:100,right:300,bottom:300}],

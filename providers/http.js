@@ -11,6 +11,8 @@
  *      читабельний текст українською.
  * ========================================================================== */
 
+const httpI18n = require('../i18n.js');
+
 /** UTF-8 без TextEncoder — в UXP його немає. */
 function strToBytes(str) {
     const bytes = [];
@@ -90,7 +92,7 @@ const RETRYABLE = s => s === 429 || s === 408 || s === 409 || (s >= 500 && s < 6
 
 /** Скасування користувачем — окремий тип, щоб withRetry його НЕ повторював. */
 class Cancelled extends Error {
-    constructor() { super('Скасовано'); this.name = 'Cancelled'; this.cancelled = true; }
+    constructor() { super(httpI18n.t('provider.cancelled')); this.name = 'Cancelled'; this.cancelled = true; }
 }
 
 /**
@@ -132,9 +134,13 @@ async function request(url, { method = 'GET', headers = {}, body, timeoutMs = 30
         } catch (e) {
             if (e && (e.name === 'AbortError' || String(e.message).includes('abort'))) {
                 if (link.wasCancelled()) throw new Cancelled();
-                throw new HttpError(0, `Запит перевищив ${Math.round(timeoutMs / 1000)} с і був скасований`);
+                throw new HttpError(0, httpI18n.t('provider.timeout', {
+                    seconds: Math.round(timeoutMs / 1000),
+                }));
             }
-            throw new HttpError(0, `Немає з'єднання з ${new URL(url).host}: ${e.message}`);
+            throw new HttpError(0, httpI18n.t('provider.noConnection', {
+                host: new URL(url).host, error: e.message,
+            }));
         }
 
         const text = await res.text();
@@ -143,7 +149,7 @@ async function request(url, { method = 'GET', headers = {}, body, timeoutMs = 30
         try {
             return JSON.parse(text);
         } catch (e) {
-            throw new HttpError(res.status, 'Провайдер повернув не JSON — можливо, змінився формат API');
+            throw new HttpError(res.status, httpI18n.t('provider.invalidJson'));
         }
     } finally {
         link.done();
@@ -193,9 +199,13 @@ async function requestStream(url, { method = 'POST', headers = {}, body, timeout
         } catch (e) {
             if (e && (e.name === 'AbortError' || String(e.message).includes('abort'))) {
                 if (link.wasCancelled()) throw new Cancelled();
-                throw new HttpError(0, `Потік перевищив ${Math.round(timeoutMs / 1000)} с`);
+                throw new HttpError(0, httpI18n.t('provider.streamTimeout', {
+                    seconds: Math.round(timeoutMs / 1000),
+                }));
             }
-            throw new HttpError(0, `Немає з'єднання з ${new URL(url).host}: ${e.message}`);
+            throw new HttpError(0, httpI18n.t('provider.noConnection', {
+                host: new URL(url).host, error: e.message,
+            }));
         }
         if (!res.ok) throw errorFromBody(res, await res.text());
 

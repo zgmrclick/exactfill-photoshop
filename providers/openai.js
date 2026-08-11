@@ -16,6 +16,7 @@
  * ========================================================================== */
 
 const { buildMultipart, request, requestStream, withRetry, HttpError } = require('./http.js');
+const openAiI18n = require('../i18n.js');
 
 const BASE = 'https://api.openai.com/v1/';
 const PARTIAL_IMAGES = 3;
@@ -59,18 +60,18 @@ function capsFor(modelId) {
 /** Витягує base64 PNG із відповіді, або кидає читабельну помилку. */
 function extractImages(json, n) {
     if (!json || !Array.isArray(json.data)) {
-        throw new HttpError(0, 'Відповідь OpenAI без масиву data — можливо, змінився формат API');
+        throw new HttpError(0, openAiI18n.t('provider.openaiNoData'));
     }
     const out = [];
     for (const item of json.data) {
         if (item && typeof item.b64_json === 'string') out.push(item.b64_json);
         else if (item && item.url) {
-            throw new HttpError(0, 'OpenAI повернув URL замість base64 — плагін очікує b64_json');
+            throw new HttpError(0, openAiI18n.t('provider.openaiUrl'));
         }
     }
     if (!out.length) {
-        const refusal = json.data[0]?.revised_prompt ? ' (промпт було переписано)' : '';
-        throw new HttpError(0, `OpenAI не повернув зображень${refusal}`);
+        const refusal = json.data[0]?.revised_prompt ? openAiI18n.t('provider.openaiRewritten') : '';
+        throw new HttpError(0, openAiI18n.t('provider.openaiNoImages', { refusal }));
     }
     return out.slice(0, n);
 }
@@ -95,12 +96,12 @@ async function readImageStream({ url, headers, body, signal, onPartial,
         } else if (ev.type === completedType) {
             done = ev;
         } else if (ev.type === 'error' || ev.error) {
-            throw new HttpError(0, ev.error?.message || 'Помилка в потоці OpenAI');
+            throw new HttpError(0, ev.error?.message || openAiI18n.t('provider.openaiStreamError'));
         }
     });
     const fin = done || last;
     if (!fin || fin.type !== completedType || !fin.b64_json) {
-        throw new HttpError(0, 'Потік OpenAI завершився без готового зображення');
+        throw new HttpError(0, openAiI18n.t('provider.openaiStreamIncomplete'));
     }
     return { images: [fin.b64_json], usage: fin.usage || null };
 }
@@ -208,16 +209,16 @@ async function generateFresh({ apiKey, model, prompt, plan, background, signal, 
  */
 async function generate({ apiKey, model, prompt, imageBlob, maskBlob, references,
                           plan, background, ignorePixels, signal, onPartial, onProgress }) {
-    if (!apiKey) throw new Error('Немає ключа OpenAI — увійдіть у розділі API');
-    if (!prompt || !prompt.trim()) throw new Error('Порожній промпт');
+    if (!apiKey) throw new Error(openAiI18n.t('provider.noKey', { provider: 'OpenAI' }));
+    if (!prompt || !prompt.trim()) throw new Error(openAiI18n.t('provider.emptyPrompt'));
 
-    if (onProgress) onProgress('Генерація…');
+    if (onProgress) onProgress(openAiI18n.t('provider.generating'));
     const useEdit = imageBlob && !ignorePixels;
     const res = await withRetry(() => (useEdit
         ? editImage({ apiKey, model, prompt, imageBlob, maskBlob, references,
                       plan, background, signal, onPartial })
         : generateFresh({ apiKey, model, prompt, plan, background, signal, onPartial })), { signal });
-    if (onProgress) onProgress('Готово');
+    if (onProgress) onProgress(openAiI18n.t('provider.done'));
     return res;
 }
 

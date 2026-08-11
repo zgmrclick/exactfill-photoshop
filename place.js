@@ -20,6 +20,7 @@
 const { app, core, imaging, constants } = require('photoshop');
 const { batchPlay } = require('photoshop').action;
 const uxpStorage = require('uxp').storage;
+const placeI18n = require('./i18n.js');
 
 /**
  * Єдиний дозволений спосіб торкатися imaging у всьому плагіні: dispose у finally
@@ -200,10 +201,12 @@ const { integerTarget, insetBlendRadius, planFrame } = require('./geometry.js');
 async function placeGeneratedSmartObject(b64, bounds, channelName, opts = {}) {
     const maskFeather = Math.max(0, Number(opts.maskFeather) || 0);
     const doc = app.activeDocument;
-    if (!doc) throw new Error('Немає активного документа');
+    if (!doc) throw new Error(placeI18n.t('place.noDocument'));
 
     const target = integerTarget(bounds);
-    if (target.w < 1 || target.h < 1) throw new Error(`Порожня цільова область ${target.w}×${target.h}`);
+    if (target.w < 1 || target.h < 1) {
+        throw new Error(placeI18n.t('place.emptyTarget', { width: target.w, height: target.h }));
+    }
 
     const png = setPngResolution(base64ToBytes(b64), doc.resolution);
     const nat = readPngSize(png);
@@ -244,7 +247,7 @@ async function placeGeneratedSmartObject(b64, bounds, channelName, opts = {}) {
         }], {});
 
         const layer = doc.activeLayers[0];
-        if (!layer) throw new Error('Place не створив шар');
+        if (!layer) throw new Error(placeI18n.t('place.noLayer'));
         try { layer.name = `AI ${new Date().toLocaleTimeString()}`; } catch (e) {}
 
         /* 4. Скидання трансформацій до нативного 1:1. Виміряно: команда дає
@@ -324,7 +327,7 @@ async function placeGeneratedSmartObject(b64, bounds, channelName, opts = {}) {
         const maskApplied = await applySelectionMask(channelName, maskTarget, maskFeather);
         report.mask = { applied: maskApplied, source: channelName ? 'selection' : 'rectangle',
             feather: maskFeather };
-        if (!maskApplied) throw new Error('Photoshop не створив маску шару');
+        if (!maskApplied) throw new Error(placeI18n.t('place.noMask'));
 
         console.log('[place]', JSON.stringify(report));
         return report;

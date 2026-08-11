@@ -1,7 +1,7 @@
 {
   "id": "ai-image-ps",
-  "name": "AI Image",
-  "version": "1.1.0",
+  "name": "ExactFill",
+  "version": "1.2.0",
   "main": "index.html",
   "host": {
     "app": "PS",
@@ -32,20 +32,20 @@
         {
           "width": 23,
           "height": 23,
-          "path": "icons/openai.svg",
+          "path": "icons/exactfill.svg",
           "scale": [1, 2],
           "theme": ["lightest", "light", "medium", "dark", "darkest", "all"],
           "species": ["generic"]
         }
       ],
-      "label": { "default": "AI Image" }
+      "label": { "default": "ExactFill" }
     }
   ],
   "icons": [
     {
       "width": 24,
       "height": 24,
-      "path": "icons/openai.svg",
+      "path": "icons/exactfill.svg",
       "scale": [1, 2],
       "theme": ["lightest", "light", "medium", "dark", "darkest", "all"],
       "species": ["generic"]

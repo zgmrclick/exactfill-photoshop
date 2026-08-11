@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="../style.css">
+    <style>
+        html { background: #323232; }
+        body { width: 280px; min-height: 520px; margin: 20px auto; font-family: Arial, sans-serif; }
+        #main { display: block !important; }
+        sp-button, sp-checkbox { display: inline-block; }
+        sp-button { padding: 6px 9px; border-radius: 4px; background: #4b4b4b; cursor: pointer; }
+        sp-button[variant="cta"] { color: white; background: #1473e6; }
+        sp-button[disabled] { opacity: .5; cursor: default; }
+        sp-checkbox { margin: 3px 0; }
+        .mock-picker { flex: 1; padding: 6px; color: #eee; background: #454545; border: 1px solid #666; border-radius: 4px; }
+    </style>
+    <script>
+        window.__openedExactFillUrl = '';
+        window.open = url => { window.__openedExactFillUrl = url; return null; };
+        window.require = name => {
+            if (name === './app-info.js') return {
+                version: '1.2.0', issues: 'https://github.com/zgmrclick/exactfill-photoshop/issues/new',
+                privacy: 'https://github.com/zgmrclick/exactfill-photoshop/blob/master/PRIVACY.md', supportUrl: ''
+            };
+            if (name === './i18n.js') return window.exactFillI18n;
+            if (name === 'uxp') return { host: { name: 'Photoshop', version: '27.5.0', uiLocale: 'en_US' },
+                shell: { openExternal: async url => { window.__openedExactFillUrl = url; } } };
+            if (name === 'os') return { platform: () => 'darwin' };
+            throw new Error('Unknown harness module: ' + name);
+        };
+    </script>
+</head>
+<body>
+    <header class="brand-bar">
+        <img src="../icons/exactfill.svg" class="brand-icon" alt="">
+        <div class="brand-copy">
+            <strong>ExactFill</strong>
+            <span data-i18n="brand.tagline">Exact AI edits. Native Photoshop layers.</span>
+        </div>
+        <span id="app-version" class="version"></span>
+    </header>
+
+    <div id="main">
+        <textarea id="prompt-input" rows="3" data-i18n-placeholder="prompt.placeholder"
+                  placeholder="What should change in the selected area?"></textarea>
+        <div class="row">
+            <label class="lbl" data-i18n="field.provider">Provider</label>
+            <div class="mock-picker">OpenAI⌄</div>
+        </div>
+        <div class="row">
+            <label class="lbl" data-i18n="field.model">Model</label>
+            <div class="mock-picker">GPT Image 2⌄</div>
+        </div>
+        <div class="field">
+            <label class="lbl" data-i18n="field.quality">Quality</label>
+            <div class="seg">
+                <button class="seg-btn" data-i18n="quality.auto">Auto</button>
+                <button class="seg-btn" data-i18n="quality.low">Low</button>
+                <button class="seg-btn active" data-i18n="quality.medium">Medium</button>
+                <button class="seg-btn" data-i18n="quality.high">High</button>
+            </div>
+        </div>
+        <p class="plan">Request: edit · input PNG · selection 1024×1024</p>
+        <div class="row gen-row"><sp-button variant="cta" class="grow" data-i18n="action.generate">Generate</sp-button></div>
+
+        <div class="section collapsible">
+            <div class="head"><span data-i18n="options.title">Area and edge settings</span></div>
+            <div class="body checks">
+                <sp-checkbox data-i18n="options.lossless">Lossless input</sp-checkbox>
+                <sp-checkbox data-i18n="options.livePreview">Live preview</sp-checkbox>
+            </div>
+        </div>
+
+        <div class="section collapsible">
+            <div id="report-header" class="head"><span data-i18n="report.title">Report a bug</span></div>
+            <div id="report-body" class="body hidden">
+                <p class="hint" data-i18n="report.hint">Describe what happened.</p>
+                <textarea id="report-summary" rows="2" data-i18n-placeholder="report.summary"></textarea>
+                <textarea id="report-details" rows="4" data-i18n-placeholder="report.details"></textarea>
+                <sp-checkbox id="report-diagnostics" checked data-i18n="report.diagnostics">Include safe diagnostics</sp-checkbox>
+                <sp-button id="report-submit" data-i18n="report.submit">Open GitHub issue</sp-button>
+                <p id="report-status" class="status"></p>
+            </div>
+        </div>
+
+        <div class="section public-footer">
+            <div class="row footer-actions">
+                <label for="language-select" class="lbl" data-i18n="language.label">Language</label>
+                <select id="language-select" class="language-select">
+                    <option value="en">English</option>
+                    <option value="uk">Українська</option>
+                </select>
+            </div>
+            <p class="hint privacy-note" data-i18n="privacy.note">Keys stay in Photoshop secure storage.</p>
+            <div class="row footer-actions">
+                <sp-button id="privacy-btn" data-i18n="privacy.open">Privacy</sp-button>
+                <sp-button id="support-btn" disabled data-i18n="support.comingSoon">Support ExactFill — coming soon</sp-button>
+            </div>
+        </div>
+    </div>
+
+    <script src="../i18n.js"></script>
+    <script src="../public-ui.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('report-header').addEventListener('click', () =>
+                document.getElementById('report-body').classList.toggle('hidden'));
+        });
+    </script>
+</body>
+</html>

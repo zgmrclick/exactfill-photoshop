@@ -1,228 +1,111 @@
-# AI Image — один плагін Photoshop замість двох
+# ExactFill for Photoshop
 
-Замінює `NanoBananaPluginPS` і `GPT-imagePluginPS`. Один сценарій:
-**прямокутне виділення → промпт → провайдер/модель/якість → Smart Object точно на місці.**
-Працює в RGB і CMYK, 8/16/32 біт.
+[Українська версія](README.uk.md)
 
-## Встановлення й оновлення
+Exact AI edits, placed exactly where you selected them.
 
-### macOS
+ExactFill is a free, open-source Photoshop plugin that connects directly to
+OpenAI and Google Gemini with your own API keys. Select an area, describe the
+change, and get the result back as a precisely positioned Smart Object with a
+Photoshop layer mask.
 
-```bash
-~/ai-image-ps/deploy.sh
-```
+> No account, no ExactFill server, no credit packs. You pay the AI provider
+> directly and can see estimated API costs inside the plugin.
 
-Потім перезапустити Photoshop. Панель: **Plugins → AI Image**.
+## Why ExactFill
 
-**Пароль потрібен лише один раз** — `/Applications/.../Plug-ins` належить root, тому
-створити там папку без `sudo` не можна. Скрипт одразу робить `chown` на вас, і всі
-наступні оновлення йдуть без пароля; він сам перевіряє, чи папка вже записувана.
+- Precise placement in the original selection, including odd and fractional bounds.
+- Non-destructive Smart Object output and Photoshop-native layer masks.
+- RGB, CMYK, Grayscale and Lab workflows; 8/16/32-bit documents stay unchanged.
+- OpenAI GPT Image and Google Gemini image models in one panel.
+- Edge blending, context control, references, transparent output and lossless input.
+- OpenAI intermediate preview frames when the API and UXP runtime support streaming.
+- Persistent cost statistics, recent history, presets and a local result cache.
+- English and Ukrainian interface.
+
+## Install
+
+Download `ExactFill-1.2.0.zip` from [Releases](https://github.com/zgmrclick/exactfill-photoshop/releases),
+extract it completely, and close Photoshop before copying the folder.
 
 ### Windows
 
-Найпростіше: розпакувати `AI-Image-Windows.zip`, двічі натиснути
-**Install AI Image.cmd** і підтвердити стандартний запит Windows. Після повідомлення
-`Done` перезапустити Photoshop: **Plugins → AI Image**.
+Copy the entire `ExactFill` folder to the `Plug-ins` folder of your Photoshop,
+for example:
 
-Ручний варіант: запустити PowerShell **від імені адміністратора** з папки плагіна:
-
-```powershell
-.\deploy.ps1
+```text
+C:\Program Files\Adobe\Adobe Photoshop 2026\Plug-ins\ExactFill
 ```
 
-Типовий шлях — `C:\Program Files\Adobe\Adobe Photoshop 2026`. Якщо Photoshop
-встановлений деінде, передайте корінь явно:
+### macOS
 
-```powershell
-.\deploy.ps1 -PhotoshopRoot "D:\Adobe\Adobe Photoshop 2026"
+Copy the entire `ExactFill` folder to the `Plug-ins` folder of your Photoshop,
+for example:
+
+```text
+/Applications/Adobe Photoshop 2026/Plug-ins/ExactFill
 ```
 
-Скрипт копіює лише runtime-файли, без `.git`, тестів і протоколів перевірки.
-Після встановлення перезапустіть Photoshop: **Plugins → AI Image**.
+Start Photoshop and open **Plugins → ExactFill**. The final `ExactFill` folder
+must contain `manifest.json` directly inside it. If you are upgrading from the
+private **AI Image** build, replace its old `AiImagePS` folder instead of keeping
+both copies.
 
-Перед релізом Windows-інсталятор і runtime перевіряються командою `node --test
-test/*.test.js`; окремо парситься `deploy.ps1`. Фінальний smoke-test все одно треба
-робити у справжньому Photoshop на Windows — macOS не може довести поведінку Windows UXP.
+The archive also contains the same instructions in English and Ukrainian.
 
-Розробляти краще тут (`~/ai-image-ps`), а в `Plug-ins` тільки копіювати — у старих
-плагінах всередині `Plug-ins` лежали повні git-репозиторії з демо-гіфками (77 МБ `.git`
-+ 22 МБ `doc-assets` при 250 КБ коду), а Photoshop сканує цю папку при кожному старті.
-`deploy.sh` виключає `.git`, `test`, `node_modules` і сам себе.
+## First use
 
-**Ключі API доведеться ввести заново** (лише при першому встановленні) — `secureStorage` в UXP ізольований per plugin id,
-тому ключі зі старих плагінів сюди не переїдуть. Потрібні два: OpenAI і Google (кожен
-запитується при виборі відповідного провайдера).
+1. Open a document and make a selection.
+2. Choose OpenAI or Google Gemini and paste that provider's API key.
+3. Describe what should change and select **Generate**.
+4. Review the new Smart Object and adjust its layer mask if needed.
 
-## Що виміряно в живому Photoshop 27.5.0
+API keys are stored with Photoshop UXP `secureStorage`. The selected pixels,
+prompt and optional references are sent directly from Photoshop to the provider
+you selected. See [Privacy](PRIVACY.md) for details.
 
-Adobe не документує batchPlay-ID узагалі, тому все нижче перевірено **вимірюванням**, а не
-з документації: скрипт створював власні документи, ставив Smart Object, читав фактичну
-рамку через `smartObjectMore.transform` і порівнював із цільовою. Звіти —
-`verify/probe*.txt` (у репо).
+## Cost and model availability
 
-| # | Питання | Результат |
-|---|---|---|
-| 1 | Координатна система `smartObjectMore.transform` | ✅ координати **документа**, кути TL→TR→BR→BL, тип `double`. Для 1024 px у канві 2000×1500: `488,238, 1512,238, 1512,1262, 488,1262` |
-| 2 | `transform rectangle→quadrilateral` | ❌ **не робить нічого** і не кидає помилки — у всіх трьох варіантах одиниць. Механізм замінено |
-| 3 | `placedLayerResetTransforms` | ✅ дає нативний 1:1 (`4266.667 → 1024`), позицію змінює — нам байдуже, бо міряємо після |
-| 4 | `resizePastePlace` через `generalPreferences` | ✅ читається й пишеться, значення відновлюється |
-| 5 | **Чи `place` конвертує CMYK/16/32-біт** | ✅ **ні.** Режим і бітність незмінні, в історії рівно «Поместить встроенный смарт-объект». Несуча передумова архітектури підтверджена |
-| 6 | Чи `pHYs` усуває PPI-масштабування | ✅ без чанка `1024 → 4266.667` (рівно 300/72), із `pHYs=300` → `1024` |
-| 7 | `componentSize:8` з 16-бітного документа | ⏳ лише через UXP — `verify-assumptions.psjs` |
-| 8 | `getPixels` у CMYK | ⏳ вимкнено свідомо: `capture.js` CMYK через imaging не читає |
-| 9 | PNG від `png.js` читається Photoshop-ом | ✅ і RGB (colorType 2), і Grey+Alpha маска (colorType 4) — deflate коректний проти реального декодера, не лише проти `zlib` |
-| 10 | Одиниці `move` | ⚠️ `distanceUnit` — це **пункти**: −567 у 300-ppi документі дає −2362 = −567×300/72. Правильний — `pixelsUnit` |
-| 11 | `nonAffineTransform` | ⚠️ присутній **завжди** і одразу після place дублює `transform`. Перекіс = розбіжність, не присутність ключа |
-| 12 | Дробовий зсув | ⚠️ не підтримується: `move(0.25, −0.75)` фактично дає `(0, −1)` |
+ExactFill itself is free. OpenAI and Google may charge for API use according to
+their own pricing. The plugin keeps a local request ledger and shows an estimated
+USD cost whenever the API response provides enough usage information. Pricing
+and model availability can change; the provider's bill is authoritative.
 
-**Матриця точності — 14/14 з residual 0, один прохід на кейс:**
-RGB 8 / CMYK 8 / CMYK 16 / RGB 16 / RGB 32 / Grayscale 16, при 300 і 72 ppi,
-виділення парне 200×200 · **непарне 201×201** · дробові межі `332.6…477.5` · 1×1 px ·
-cover 400×400 із непропорційної відповіді · поза канвою · відʼємний початок ·
-збільшення 1601×1601. Жоден документ не сконвертовано, нативний растр Smart Object
-збережено в усіх випадках.
+## Compatibility
 
-### Що лишилось перевірити самому
+- Adobe Photoshop 2024 or newer (`25.0+`).
+- Windows and macOS use the same plugin files.
+- A network connection and an API key for the selected provider are required.
+- Final Windows behavior should be verified on a real Windows Photoshop setup.
 
-Усе вище міряно через Action Manager (ExtendScript) — це той самий шар, що й `batchPlay`,
-лише інший фасад. Неперевіреним лишився один шар: **обгортка `batchPlay`** (як UXP
-перетворює JSON `_unit`/`_obj`/`_enum` у `ActionDescriptor`) і модуль **`imaging`**, якого
-в ExtendScript немає.
+## Reporting problems
 
-**File → Scripts → Browse… → `verify-assumptions.psjs`**
+Use **Report a bug** inside the panel or open a
+[GitHub issue](https://github.com/zgmrclick/exactfill-photoshop/issues/new/choose).
+The in-plugin form can include version, OS, provider, model and settings; it does
+not include API keys, prompts, document names, paths, images or usage history.
 
-Скрипт проганяє 8 кейсів тими самими примітивами, що й плагін, і друкує residual.
-Якщо там нулі — паритет підтверджено. Якщо ні, різниця саме в обгортці.
+See [Support](SUPPORT.md), [Security](SECURITY.md), and
+[Contributing](CONTRIBUTING.md) before sharing sensitive details or submitting code.
 
-## Головна метрика точності
+## Support the project
 
-Після кожної вставки в консолі:
+A donation link will be added after the public launch. For now, a star, a useful
+bug report, a short demo, or sharing ExactFill with another Photoshop user helps.
 
-```
-[main] вставка 1/1: residual {"dx":0,"dy":0,"dw":0,"dh":0}
-```
+## Development
 
-`residual` — розбіжність між тим, куди мав стати Smart Object, і куди він став насправді.
-**Мусить бути нулем.** Якщо ні — це те саме «вставка не завжди точна», і числа скажуть, де саме.
-
-Матрицю з 14 кейсів уже прогнано — див. розділ вище, всюди нуль. У CMYK-документі в
-палітрі History **не має з'явитися жодного «Convert Mode»**, а `mode` і `bitsPerChannel`
-мусять лишитися незмінними; це теж перевірено.
-
-## Можливості
-
-| | |
-|---|---|
-| **Змішування краю** | Один слайдер керує **двома** масками. Request-маска OpenAI мʼяко вводить модель у контекст, а layer-маска Photoshop робить перехід лише **всередині** виділення: на початковій межі AI-шар уже повністю прихований, тому напівпрозорий градієнт не обривається на краю Smart Object. 0–256 px, за замовчуванням 16; для великих фото зазвичай доречні 32–128 px. |
-| **Вхід без втрат** | PNG замість JPEG: модель не бачить артефактів, яких у макеті не було. Вище 2 МП автоматично JPEG — власний deflate на фотографії такого розміру рахувався б секунди. |
-| **Прозорий фон** | `background=transparent` — обʼєкт одразу Smart Object'ом без вирізання. Лише OpenAI. |
-| **Референси** | Кілька зображень «зроби в цьому стилі». Обидва провайдери; ваша область завжди перша, бо маска застосовується до першого зображення. |
-| **Живий прев'ю** | `stream: true` + `partial_images: 3` → до трьох проміжних кадрів під час редагування або генерації з нуля. Лише OpenAI. Якщо `fetch` в UXP не вміє потокове читання тіла — тихо переходить на звичайний запит, у консолі про це буде рядок. |
-| **Скасування** | Кнопка й `Esc`. Скасування не ретраїться — інакше воно лише подовжувало б очікування. |
-| **Перегенерувати** | Та сама область і той самий промпт, без нового виділення. |
-| **Кеш результатів** | 8 останніх на диску з ротацією. Повторна вставка — без запиту, тобто безкоштовно. Розмір і кнопка «Очистити» — у панелі, бо саме безконтрольне зростання дало старому плагіну 2.97 ГБ. |
-| **Що буде запрошено** | Рядок над кнопкою: розмір, мегапікселі, формат входу, розмір контексту. Оновлюється сам при зміні виділення. |
-| **Статистика витрат** | Постійний журнал переживає перезапуск Photoshop: останній запит, сьогодні, 7 днів, увесь журнал і 7 останніх запитів. Показує токени та оцінку USD за версіонованим офіційним прайсом OpenAI/Google; сума зберігається на момент запиту, тому нові тарифи не змінюють історію. Максимум 500 записів / 365 днів, є ручне очищення. |
-| **Не-прямокутне виділення** | Працює: layer-маска будується з каналу справжнього виділення, тому ласо й еліпс обрізаються за формою. Запит іде по bounding box. |
-| **`Cmd+Enter`** | Генерувати з поля промпту. |
-
-Варіацій **немає свідомо**: вони вставляли N шарів один поверх одного з однаковою
-маскою — заплатив за чотири, а порівнювати доводилось кліканням видимості в палітрі.
-Замість них «Перегенерувати» і кеш.
-
-## Архітектура
-
-```
-main.js       797  єдиний потік: гейт → capture → provider → place + весь UI
-place.js      388  вставка: pHYs → placeEvent → вимір → масштаб % → зсув px → вимір
-capture.js    269  захоплення: RGB/Gray/Lab напряму, решта через ДУБЛІКАТ документа
-geometry.js   214  уся арифметика; чистий модуль, тестується в node
-layer-tree.js      ізоляція вкладеного активного шару на копії документа
-usage.js           журнал, часові зрізи й версіоновані тарифи OpenAI/Google
-png.js        324  PNG + справжній deflate; мʼяка маска (1024² = 15.6 КБ замість 4 МБ)
-cache.js      146  кеш результатів із ротацією — повторна вставка без запиту
-providers/
-  index.js     28  реєстр
-  http.js     276  fetch зі скасуванням і SSE, ретрай 429 з Retry-After
-  openai.js   201  gpt-image-2 (довільний розмір) + 1/1.5/mini, потік, референси
-  google.js   216  gemini-*-image, imageConfig із graceful degradation, референси
-auth.js       131  ключі, по одному на провайдера
-presets.js     86  пресети промпту (без змін)
-history.js     71  історія (без змін)
-```
-
-## Перевірка перед релізом
+No package install is required. Run the Node.js test suite and build the universal
+release archive with:
 
 ```bash
-node --test test/*.test.js
-for f in *.js providers/*.js test/*.js; do node --check "$f" || exit 1; done
-git diff --check
+npm test
+npm run build
 ```
 
-Набір покриває геометрію, PNG і мʼякі маски, SSE/live-preview, скасування під час
-ретраю, ціни й часові зрізи статистики, пошкоджене локальне сховище, manifest v5,
-регістр і відсутність OS-specific шляхів, а також вкладені групи шарів.
+The release script writes `dist/ExactFill-<version>.zip`. Development measurements
+behind the placement algorithm are kept in [`verify/`](verify/README.md).
 
-Додати третього провайдера = один файл у `providers/` + один рядок у `index.js`.
-`main.js` про провайдерів не знає нічого — саме через це двом окремим плагінам більше
-немає причини існувати.
+## License
 
-### Чому так, а не як раніше
-
-Стара архітектура **передбачала** геометрію: рахувала позицію наперед у JS із ланцюга
-незалежно округлених величин, а тоді віддавала результат двом API, які половину переданого
-молча відкидають (`putPixels` читає з `targetBounds` лише `left`/`top` — «Dimension keys
-width and height are not used»). Зворотного зв'язку не було ніде.
-
-Нова **міряє**: кладе → читає фактичну рамку через `smartObjectMore.transform` →
-масштабує у відсотках **від щойно прочитаної** рамки → читає знову → зсуває на різницю →
-читає знову. Відсоток тут не накопичує похибку саме тому, що знаменник — не припущення, а
-свіжий вимір; кожен крок починається з нуля.
-
-Перша версія цього файлу робила інакше — виставляла чотири кути абсолютно через
-`transform` з `rectangle`→`quadrilateral`. **Виміряно: ця команда нічого не робить** і при
-цьому повертає успіх. Ідея була гарна, API її не підтримує; знайшлося це лише вимірюванням
-after-стану, і саме тому вимірювання тут не діагностика, а частина алгоритму.
-
-І друге: `putPixels` фізично не приймає CMYK (`createImageDataFromBuffer.colorSpace`
-документує лише RGB/Grayscale/Lab), тому старий код конвертував **увесь документ**
-CMYK→RGB→CMYK — необоротно, бо відкат історії зняв би й саму вставку. `placeEvent` з файлу
-imaging API не торкається взагалі.
-
-## Що зникло проти старих плагінів
-
-Вкладки Grid і Chat (711 рядків `chat.js`), Refine-prompt, Whole-Image/Gen-Fill, Upscale
-(був повним no-op через `CONTEXT_PAD=0`), Reference images (захоплювались, але в `options`
-не потрапляли — мертвий тракт), `saveDebugBlob` (намив 2.97 ГБ у 484 файлах),
-`encodeAs8BitJpeg` (16→8 через `>>8` при діапазоні `[0..32768]` → вдвічі темніше),
-мертві моделі (весь Imagen — вимкнений 2026-08-17, `gemini-1.5-*`, `gemini-2.0-flash-exp`),
-`generateImageWithContext` із `/v1/responses` (імпортувався, не викликався ніде).
-
-~2250 рядків геть. Було 5289 рядків JS у двох плагінах; після додавання кешу, потоку, референсів і скасування стало 3147 в одному — і при цьому
-додано двох провайдерів в одному UI, коректну геометрію й безпечний CMYK. Перерахувати:
-
-```bash
-cd ~/ai-image-ps && cat main.js place.js capture.js geometry.js png.js providers/*.js auth.js presets.js history.js | wc -l
-```
-
-## Прибрати 3 ГБ старих дампів
-
-Старий `saveDebugBlob` писав два файли на кожну генерацію, без ротації:
-
-```bash
-du -sh ~/Library/Application\ Support/Adobe/UXP/PluginsStorage/PHSP/27/External/*/PluginData/debug_logs
-```
-
-```bash
-rm -rf ~/Library/Application\ Support/Adobe/UXP/PluginsStorage/PHSP/27/External/*/PluginData/debug_logs
-```
-
-## Старі плагіни
-
-Лишаються на місці й працюють. Обидва репозиторії чисті, тому відкат будь-коли:
-
-```bash
-git -C "/Applications/Adobe Photoshop 2026/Plug-ins/GPT-imagePluginPS" checkout .
-```
-
-Видаляти їх варто лише після того, як новий плагін відпрацює на реальних макетах.
+[MIT](LICENSE) © 2026 Havryil Zahorodnii

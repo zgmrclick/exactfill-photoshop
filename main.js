@@ -23,6 +23,7 @@ const cache      = require('./cache.js');
 const presetManager  = require('./presets.js');
 const historyManager = require('./history.js');
 const usageTracker   = require('./usage.js');
+const mainI18n       = require('./i18n.js');
 
 const LS = {
     provider: 'ai_provider', model: 'ai_model', quality: 'ai_quality',
@@ -276,7 +277,7 @@ async function refreshModels() {
         catch (e) { console.warn('[ui] і вбудований перелік не вдався:', e.message); }
     }
     if (!list.length) {
-        setStatus(`Немає жодної моделі для ${p.label} — перевірте ключ і зв'язок`);
+        setStatus(mainI18n.t('status.noModels', { provider: p.label }));
         return;
     }
 
@@ -304,11 +305,11 @@ function applyProviderCapabilities() {
         if (!ok) el.title = why;
     };
     dim('transparent-bg', p.supportsTransparent !== false,
-        `${p.label} не має параметра прозорого фону — попросіть це в промпті`);
+        mainI18n.t('cap.noTransparent', { provider: p.label }));
     dim('live-preview', p.supportsStream !== false,
-        `${p.label} не віддає проміжні кадри в цьому API`);
+        mainI18n.t('cap.noPreview', { provider: p.label }));
     dim('add-ref-btn', p.supportsReferences !== false,
-        `${p.label} не приймає додаткових зображень`);
+        mainI18n.t('cap.noReferences', { provider: p.label }));
 }
 
 function initQuality() {
@@ -319,8 +320,7 @@ function initQuality() {
     for (const q of QUALITIES) {
         const btn = document.createElement('button');
         btn.className = 'seg-btn' + (q === saved ? ' active' : '');
-        btn.textContent = q === 'auto' ? 'Авто' : q === 'low' ? 'Низька'
-                        : q === 'medium' ? 'Середня' : 'Висока';
+        btn.textContent = mainI18n.t(`quality.${q}`);
         btn.dataset.value = q;
         btn.addEventListener('click', () => {
             localStorage.setItem(LS.quality, q);
@@ -351,17 +351,17 @@ async function refreshPlanLine() {
     if (!el) return;
     try {
         const doc = app.activeDocument;
-        if (!doc) { el.textContent = 'Немає відкритого документа'; el.className = 'plan dim'; return; }
+        if (!doc) { el.textContent = mainI18n.t('plan.noDocument'); el.className = 'plan dim'; return; }
 
         const sel = await readSelectionBounds(doc).catch(() => null);
         if (!sel || !sel.bounds) {
-            el.textContent = 'Виділіть прямокутну область';
+            el.textContent = mainI18n.t('plan.selectArea');
             el.className = 'plan dim';
             return;
         }
         const target = geometry.integerTarget(sel.bounds);
         if (target.w < 1 || target.h < 1) {
-            el.textContent = 'Виділення порожнє';
+            el.textContent = mainI18n.t('plan.emptySelection');
             el.className = 'plan dim';
             return;
         }
@@ -374,17 +374,23 @@ async function refreshPlanLine() {
         let what;
         if (plan.size) {
             const [w, h] = String(plan.size).split('x').map(Number);
-            what = `${w}×${h} · ${(w * h / 1e6).toFixed(2)} МП`;
+            what = `${w}×${h} · ${(w * h / 1e6).toFixed(2)} ${mainI18n.t('unit.megapixels')}`;
         } else if (plan.aspectRatio) {
             what = `${plan.aspectRatio} · ${plan.imageSize}`;
         } else {
-            what = 'розмір за замовчуванням моделі';
+            what = mainI18n.t('plan.defaultSize');
         }
         const losslessNote = s.lossless && ctx.w * ctx.h > capture.LOSSLESS_MAX_PX
-            ? ' · вхід JPEG (область > 2 МП)' : s.lossless ? ' · вхід PNG' : ' · вхід JPEG';
-        el.textContent = `Запит: ${what}${losslessNote} · виділення ${target.w}×${target.h}` +
-                         (s.padPercent ? ` · контекст ${ctx.w}×${ctx.h}` : '') +
-                         (references.length ? ` · +${references.length} реф.` : '');
+            ? ` · ${mainI18n.t('plan.inputJpegLarge')}`
+            : s.lossless ? ` · ${mainI18n.t('plan.inputPng')}` : ` · ${mainI18n.t('plan.inputJpeg')}`;
+        el.textContent = mainI18n.t('plan.request', {
+            what,
+            input: losslessNote,
+            width: target.w,
+            height: target.h,
+            context: s.padPercent ? mainI18n.t('plan.context', { width: ctx.w, height: ctx.h }) : '',
+            refs: references.length ? mainI18n.t('plan.refs', { count: references.length }) : '',
+        });
         el.className = 'plan';
     } catch (e) {
         el.textContent = '';
@@ -422,7 +428,8 @@ function recordUsage(meta, usage) {
 
 function amountWithUnknown(summary) {
     const amount = `≈${usageTracker.formatUsd(summary.usd)}`;
-    return summary.unknownCost ? `${amount} + ${summary.unknownCost} без оцінки` : amount;
+    return summary.unknownCost
+        ? mainI18n.t('usage.unknown', { amount, count: summary.unknownCost }) : amount;
 }
 
 function renderUsage() {
@@ -433,17 +440,18 @@ function renderUsage() {
 
     if (!stats.last) {
         if (compact) { compact.textContent = ''; compact.classList.add('hidden'); }
-        if (summaryEl) summaryEl.textContent = 'Запитів іще немає.';
+        if (summaryEl) summaryEl.textContent = mainI18n.t('usage.empty');
         if (listEl) listEl.innerHTML = '';
         setBadge('usage-badge', '');
         return;
     }
 
     const lastAmount = Number.isFinite(stats.last.costUsd)
-        ? `≈${usageTracker.formatUsd(stats.last.costUsd)}` : 'вартість —';
+        ? `≈${usageTracker.formatUsd(stats.last.costUsd)}` : mainI18n.t('usage.costUnknown');
     if (compact) {
-        compact.textContent = `Останній: ${lastAmount} · сьогодні: ${amountWithUnknown(stats.today)} ` +
-            `(${stats.today.requests}) · 7 днів: ${amountWithUnknown(stats.sevenDays)} ` +
+        compact.textContent = `${mainI18n.t('usage.last')}: ${lastAmount} · ` +
+            `${mainI18n.t('usage.today').toLowerCase()}: ${amountWithUnknown(stats.today)} ` +
+            `(${stats.today.requests}) · ${mainI18n.t('usage.sevenDays')}: ${amountWithUnknown(stats.sevenDays)} ` +
             `(${stats.sevenDays.requests})`;
         compact.classList.remove('hidden');
     }
@@ -451,7 +459,9 @@ function renderUsage() {
 
     if (summaryEl) {
         summaryEl.innerHTML = '';
-        for (const [label, data] of [['Сьогодні', stats.today], ['7 днів', stats.sevenDays], ['Усього в журналі', stats.all]]) {
+        for (const [label, data] of [[mainI18n.t('usage.today'), stats.today],
+                                     [mainI18n.t('usage.sevenDays'), stats.sevenDays],
+                                     [mainI18n.t('usage.all'), stats.all]]) {
             const card = document.createElement('div');
             card.className = 'usage-card';
             const name = document.createElement('span');
@@ -461,8 +471,9 @@ function renderUsage() {
             value.textContent = amountWithUnknown(data);
             const meta = document.createElement('span');
             meta.className = 'usage-card-meta';
-            meta.textContent = `${data.requests} зап. · ${usageTracker.formatTokens(data.inputTokens)} вх. / ` +
-                `${usageTracker.formatTokens(data.outputTokens)} вих.`;
+            meta.textContent = `${data.requests} ${mainI18n.t('usage.requestsShort')} · ` +
+                `${usageTracker.formatTokens(data.inputTokens)} ${mainI18n.t('usage.inputShort')} / ` +
+                `${usageTracker.formatTokens(data.outputTokens)} ${mainI18n.t('usage.outputShort')}`;
             card.appendChild(name); card.appendChild(value); card.appendChild(meta);
             summaryEl.appendChild(card);
         }
@@ -481,12 +492,12 @@ function renderUsage() {
             const meta = document.createElement('div');
             meta.className = 'usage-meta';
             const when = new Date(entry.at);
-            const date = when.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit' });
-            const time = when.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' });
+            const date = when.toLocaleDateString(mainI18n.dateLocale(), { day: '2-digit', month: '2-digit' });
+            const time = when.toLocaleTimeString(mainI18n.dateLocale(), { hour: '2-digit', minute: '2-digit' });
             const shape = [entry.quality, entry.size, entry.aspectRatio].filter(Boolean).join(' · ');
             meta.textContent = `${date} ${time}${shape ? ` · ${shape}` : ''} · ` +
-                `${usageTracker.formatTokens(entry.inputTokens)} вх. / ` +
-                `${usageTracker.formatTokens(entry.outputTokens)} вих.`;
+                `${usageTracker.formatTokens(entry.inputTokens)} ${mainI18n.t('usage.inputShort')} / ` +
+                `${usageTracker.formatTokens(entry.outputTokens)} ${mainI18n.t('usage.outputShort')}`;
             const amount = document.createElement('div');
             amount.className = 'usage-amount';
             amount.textContent = Number.isFinite(entry.costUsd)
@@ -538,7 +549,7 @@ async function pickReferences() {
     } catch (e) {
         if (e && /cancel/i.test(String(e.message))) return;
         console.error('[ui] референси не додались:', e.message);
-        setStatus('Не вдалось додати референси: ' + e.message);
+        setStatus(mainI18n.t('refs.addError', { error: e.message }));
     }
 }
 
@@ -558,7 +569,7 @@ function renderPresets() {
         const del = document.createElement('button');
         del.className = 'icon-btn';
         del.textContent = '✕';
-        del.title = 'Видалити';
+        del.title = mainI18n.t('common.delete');
         del.addEventListener('click', () => { presetManager.delete(p.id); renderPresets(); });
         row.append(cb, del);
         list.appendChild(row);
@@ -576,8 +587,8 @@ function renderHistory() {
         row.className = 'history-row';
         const txt = document.createElement('span');
         txt.className = 'history-prompt';
-        txt.textContent = (h.prompt || '').slice(0, 90) || '(без промпту)';
-        txt.title = 'Підставити промпт і налаштування';
+        txt.textContent = (h.prompt || '').slice(0, 90) || mainI18n.t('common.noPrompt');
+        txt.title = mainI18n.t('history.restore');
         txt.addEventListener('click', () => {
             const el = $('prompt-input');
             if (el) { el.value = h.prompt || ''; localStorage.setItem(LS.prompt, el.value); }
@@ -605,12 +616,12 @@ function renderCache() {
             txt.className = 'cache-info';
             const m = e.meta || {};
             const when = new Date(e.at).toLocaleTimeString();
-            txt.textContent = `${when} · ${(e.size / 1024).toFixed(0)} КБ · ` +
-                              `${(m.prompt || '').slice(0, 40) || '(без промпту)'}`;
+            txt.textContent = `${when} · ${(e.size / 1024).toFixed(0)} KB · ` +
+                              `${(m.prompt || '').slice(0, 40) || mainI18n.t('common.noPrompt')}`;
             const ins = document.createElement('button');
             ins.className = 'mini-btn';
-            ins.textContent = 'Вставити';
-            ins.title = 'Вставити ще раз — без запиту до провайдера';
+            ins.textContent = mainI18n.t('cache.insert');
+            ins.title = mainI18n.t('cache.insertTitle');
             ins.addEventListener('click', () => reinsert(e.id));
             const del = document.createElement('button');
             del.className = 'icon-btn';
@@ -668,8 +679,8 @@ async function insertImage(b64, ctx, target, feather) {
             if (el) {
                 const zero = [r.dx, r.dy, r.dw, r.dh].every(v => Math.abs(Number(v) || 0) < 0.01);
                 el.textContent = zero
-                    ? 'Вставлено точно: залишок 0'
-                    : `Залишок: dx=${r.dx} dy=${r.dy} dw=${r.dw} dh=${r.dh}`;
+                    ? mainI18n.t('residual.exact')
+                    : mainI18n.t('residual.value', r);
                 el.className = 'residual' + (zero ? ' ok' : ' warn');
             }
             console.log('[main] residual', JSON.stringify(report.residual),
@@ -681,21 +692,21 @@ async function insertImage(b64, ctx, target, feather) {
                 } catch (e) {}
             }
         }
-    }, { commandName: 'Вставка згенерованого' });
+    }, { commandName: mainI18n.t('command.insert') });
 }
 
 async function reinsert(cacheId) {
     if (busy) return;
     const entry = cache.list().find(e => e.id === cacheId);
-    if (!entry) { setStatus('Запис зник із кешу'); renderCache(); return; }
+    if (!entry) { setStatus(mainI18n.t('cache.missing')); renderCache(); return; }
     const doc = app.activeDocument;
-    if (!doc) { await core.showAlert('Відкрийте документ.'); return; }
+    if (!doc) { await core.showAlert(mainI18n.t('alert.openDocument')); return; }
 
     setBusy(true);
     try {
-        setStatus('Читаю з кешу…');
+        setStatus(mainI18n.t('cache.reading'));
         const b64 = await cache.get(cacheId);
-        if (!b64) { setStatus('Файл кешу недоступний'); renderCache(); return; }
+        if (!b64) { setStatus(mainI18n.t('cache.fileMissing')); renderCache(); return; }
         const m = entry.meta || {};
         // Якщо є активне виділення — вставляємо в НЬОГО; інакше в збережену область.
         const sel = await readSelectionBounds(doc).catch(() => null);
@@ -703,19 +714,19 @@ async function reinsert(cacheId) {
         if (sel && sel.bounds) {
             target = geometry.integerTarget(sel.bounds);
             ctx = expandForContext(target, doc, Number(m.padPercent) || 0);
-            setStatus('Вставляю з кешу в поточне виділення…');
+            setStatus(mainI18n.t('cache.insertCurrent'));
         } else if (!ctx) {
-            setStatus('У кеші немає координат, а виділення відсутнє');
+            setStatus(mainI18n.t('cache.noCoordinates'));
             return;
         } else {
-            setStatus('Вставляю з кешу в збережену область…');
+            setStatus(mainI18n.t('cache.insertSaved'));
         }
         showPreview(b64);
         await insertImage(b64, ctx, target, readSettings().feather);
-        setStatus('Вставлено з кешу — без запиту до провайдера');
+        setStatus(mainI18n.t('cache.inserted'));
     } catch (e) {
         console.error('[main] повтор із кешу:', e);
-        setStatus('Не вдалось: ' + (e.message || e));
+        setStatus(mainI18n.t('error.failed', { error: e.message || e }));
     } finally {
         setBusy(false);
     }
@@ -727,18 +738,18 @@ async function onGenerate(reuse) {
     if (busy) return;
 
     const doc = app.activeDocument;
-    if (!doc) { await core.showAlert('Відкрийте документ.'); return; }
+    if (!doc) { await core.showAlert(mainI18n.t('alert.openDocument')); return; }
 
     const s = readSettings();
     const provider = currentProvider();
     const model = localStorage.getItem(LS.model);
-    if (!model) { await core.showAlert('Виберіть модель.'); return; }
+    if (!model) { await core.showAlert(mainI18n.t('alert.chooseModel')); return; }
 
     const prompt = reuse && lastRun ? lastRun.prompt : buildPrompt();
-    if (!prompt) { await core.showAlert('Напишіть, що потрібно змінити.'); return; }
+    if (!prompt) { await core.showAlert(mainI18n.t('alert.writePrompt')); return; }
 
     const apiKey = await window.aiAuth.getKey(provider.keyName);
-    if (!apiKey) { await core.showAlert(`Немає ключа ${provider.label}. Введіть його в розділі API.`); return; }
+    if (!apiKey) { await core.showAlert(mainI18n.t('alert.noKey', { provider: provider.label })); return; }
 
     const docId = doc.id;
     abortCtrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
@@ -753,14 +764,14 @@ async function onGenerate(reuse) {
         if (reuse && lastRun && lastRun.ctx) {
             target = lastRun.target;
             ctx = lastRun.ctx;
-            setStatus('Та сама область, що минулого разу…');
+            setStatus(mainI18n.t('status.sameArea'));
         } else {
-            setStatus('Читаю виділення…');
+            setStatus(mainI18n.t('status.readSelection'));
             const sel = await core.executeAsModal(() => readSelectionBounds(app.activeDocument),
-                { commandName: 'Читання виділення' });
-            if (!sel || !sel.bounds) { await core.showAlert('Виділіть прямокутну область.'); return; }
+                { commandName: mainI18n.t('command.readSelection') });
+            if (!sel || !sel.bounds) { await core.showAlert(mainI18n.t('alert.selectArea')); return; }
             target = geometry.integerTarget(sel.bounds);
-            if (target.w < 1 || target.h < 1) { await core.showAlert('Виділення порожнє.'); return; }
+            if (target.w < 1 || target.h < 1) { await core.showAlert(mainI18n.t('alert.emptySelection')); return; }
             if (!sel.solid) {
                 // Не проблема: маска шару робиться з каналу справжнього виділення,
                 // тому ласо й еліпс обрізаються правильно. Запит іде по bounding box.
@@ -778,9 +789,9 @@ async function onGenerate(reuse) {
         /* 3. Захоплення пікселів — документ користувача не змінюється */
         let cap = { blob: null, lossless: false };
         if (!s.ignorePixels) {
-            setStatus('Захоплюю область…');
+            setStatus(mainI18n.t('status.capturing'));
             cap = await core.executeAsModal(() => capture.captureRegion(ctx, s.layerOnly, s.lossless),
-                { commandName: 'Захоплення області' });
+                { commandName: mainI18n.t('command.capture') });
             console.log(`[main] захоплено: ${cap.docMode} ${cap.bpc}біт` +
                         `${cap.viaDuplicate ? ' (через дублікат)' : ''}` +
                         `${cap.lossless ? ' PNG' : ' JPEG'}`);
@@ -802,7 +813,7 @@ async function onGenerate(reuse) {
         }
 
         /* 4. Генерація — поза модальним контекстом, щоб Photoshop не блокувався */
-        setStatus('Генерація…');
+        setStatus(mainI18n.t('status.generating'));
         const wantPreview = s.livePreview && provider.supportsStream !== false;
         const refBlobs = (provider.supportsReferences !== false)
             ? references.map(r => r.blob) : [];
@@ -817,13 +828,13 @@ async function onGenerate(reuse) {
             signal: abortCtrl ? abortCtrl.signal : undefined,
             onPartial: wantPreview ? (b64, idx) => {
                 showPreview(b64);
-                setStatus(`Генерація… проміжний кадр ${(idx ?? 0) + 1}`);
+                setStatus(mainI18n.t('status.partial', { number: (idx ?? 0) + 1 }));
             } : null,
             onProgress: st => setStatus(st),
         });
 
         const images = (res && res.images) || [];
-        if (!images.length) { await core.showAlert('Провайдер не повернув зображень.'); return; }
+        if (!images.length) { await core.showAlert(mainI18n.t('alert.noImages')); return; }
         showPreview(images[0]);
         // Записуємо одразу після успішної відповіді API: гроші вже витрачені,
         // навіть якщо користувач перемкне документ і вставку доведеться скасувати.
@@ -839,10 +850,10 @@ async function onGenerate(reuse) {
 
         /* 5. Вставка */
         if (!app.activeDocument || app.activeDocument.id !== docId) {
-            await core.showAlert('Активний документ змінився під час генерації — вставку скасовано.');
+            await core.showAlert(mainI18n.t('alert.documentChanged'));
             return;
         }
-        setStatus('Вставляю…');
+        setStatus(mainI18n.t('status.inserting'));
         await insertImage(images[0], ctx, target, s.feather);
 
         /* 6. Пам'ять про запуск: кеш + історія + кнопка «Перегенерувати» */
@@ -854,15 +865,15 @@ async function onGenerate(reuse) {
         lastRun = { ...meta };
         historyManager.add({ ...meta, cacheId, settings: s });
         renderHistory();
-        setStatus('Готово');
+        setStatus(mainI18n.t('status.done'));
 
     } catch (e) {
         if (e && e.cancelled) {
-            setStatus('Скасовано');
+            setStatus(mainI18n.t('status.cancelled'));
         } else {
             console.error('[main]', e);
-            await core.showAlert(`Не вдалось:\n${e && e.message ? e.message : e}`);
-            setStatus('Помилка');
+            await core.showAlert(mainI18n.t('error.failed', { error: e && e.message ? e.message : e }));
+            setStatus(mainI18n.t('status.error'));
         }
     } finally {
         abortCtrl = null;
@@ -977,7 +988,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const cancel = $('cancel-btn');
     if (cancel) cancel.addEventListener('click', () => {
-        if (abortCtrl) { abortCtrl.abort(); setStatus('Скасовую…'); }
+        if (abortCtrl) { abortCtrl.abort(); setStatus(mainI18n.t('status.cancelling')); }
     });
 
     // Cmd+Enter / Ctrl+Enter — генерувати; Esc — скасувати
@@ -988,7 +999,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (e.key === 'Escape' && busy && abortCtrl) {
             e.preventDefault();
             abortCtrl.abort();
-            setStatus('Скасовую…');
+            setStatus(mainI18n.t('status.cancelling'));
         }
     });
 
@@ -999,7 +1010,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const clearCache = $('clear-cache-btn');
     if (clearCache) clearCache.addEventListener('click', async () => {
-        await cache.clear(); renderCache(); setStatus('Кеш очищено');
+        await cache.clear(); renderCache(); setStatus(mainI18n.t('status.cacheCleared'));
     });
 
     const clearUsage = $('clear-usage-btn');
@@ -1009,7 +1020,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // із новим журналом, якщо він лишився від попередньої версії.
         localStorage.removeItem('ai_session_usage');
         renderUsage();
-        setStatus('Статистику очищено');
+        setStatus(mainI18n.t('status.usageCleared'));
     });
 
     const addPreset = $('add-preset-btn');
@@ -1026,8 +1037,20 @@ document.addEventListener('DOMContentLoaded', () => {
     // Секції, що згортаються
     for (const [head, body] of [['opts-header', 'opts-body'], ['usage-header', 'usage-body'],
                                 ['ref-header', 'ref-body'], ['cache-header', 'cache-body'],
-                                ['preset-header', 'preset-body'], ['history-header', 'history-body']]) {
+                                ['preset-header', 'preset-body'], ['history-header', 'history-body'],
+                                ['report-header', 'report-body']]) {
         const h = $(head), b = $(body);
         if (h && b) h.addEventListener('click', () => b.classList.toggle('hidden'));
     }
+});
+
+document.addEventListener('exactfill:localechange', () => {
+    initQuality();
+    applyProviderCapabilities();
+    renderPresets();
+    renderHistory();
+    renderCache();
+    renderRefs();
+    renderUsage();
+    refreshPlanLine();
 });

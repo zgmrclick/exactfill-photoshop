@@ -1,0 +1,63 @@
+EXACTFILL 1.2.0 — INSTALLATION
+================================
+
+ExactFill is the same plugin on Windows and macOS. Extract this ZIP completely,
+then copy the entire "ExactFill" folder. Do not copy the ZIP itself or only the
+files inside the folder.
+
+WINDOWS
+-------
+1. Close Photoshop.
+2. Copy the entire "ExactFill" folder to the Plug-ins folder of your Photoshop,
+   for example:
+
+   C:\Program Files\Adobe\Adobe Photoshop 2026\Plug-ins\ExactFill
+
+3. Confirm the Windows administrator prompt if it appears.
+4. Start Photoshop and open Plugins > ExactFill.
+
+macOS
+-----
+1. Close Photoshop.
+2. Copy the entire "ExactFill" folder to the Plug-ins folder of your Photoshop,
+   for example:
+
+   /Applications/Adobe Photoshop 2026/Plug-ins/ExactFill
+
+3. Enter the macOS administrator password if Finder asks for it.
+4. Start Photoshop and open Plugins > ExactFill.
+
+The final folder must contain manifest.json directly inside it.
+
+=======================================================================
+
+EXACTFILL 1.2.0 — ВСТАНОВЛЕННЯ
+================================
+
+ExactFill однаковий для Windows і macOS. Повністю розпакуйте ZIP, а потім
+скопіюйте цілу папку "ExactFill". Не копіюйте сам ZIP або лише окремі файли
+з папки.
+
+WINDOWS
+-------
+1. Закрийте Photoshop.
+2. Скопіюйте цілу папку "ExactFill" до папки Plug-ins своєї версії Photoshop,
+   наприклад:
+
+   C:\Program Files\Adobe\Adobe Photoshop 2026\Plug-ins\ExactFill
+
+3. Підтвердьте запит адміністратора Windows, якщо він з'явиться.
+4. Запустіть Photoshop і відкрийте Plugins > ExactFill.
+
+macOS
+-----
+1. Закрийте Photoshop.
+2. Скопіюйте цілу папку "ExactFill" до папки Plug-ins своєї версії Photoshop,
+   наприклад:
+
+   /Applications/Adobe Photoshop 2026/Plug-ins/ExactFill
+
+3. Введіть пароль адміністратора macOS, якщо Finder його попросить.
+4. Запустіть Photoshop і відкрийте Plugins > ExactFill.
+
+У кінцевій папці manifest.json має лежати безпосередньо всередині ExactFill.

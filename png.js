@@ -13,6 +13,8 @@
  *  zlib.inflateSync.
  * ========================================================================== */
 
+const pngI18n = require('./i18n.js');
+
 /* ── CRC32 / біти ──────────────────────────────────────────────────────────── */
 
 const CRC_TABLE = (() => {
@@ -192,7 +194,7 @@ function concat(parts) {
 function encodePng(pixels, width, height, components) {
     const COLOR_TYPE = { 1: 0, 2: 4, 3: 2, 4: 6 };
     const colorType = COLOR_TYPE[components];
-    if (colorType === undefined) throw new Error(`Непідтримувана кількість компонент: ${components}`);
+    if (colorType === undefined) throw new Error(pngI18n.t('png.components', { count: components }));
 
     const rowBytes = width * components;
     const stride   = rowBytes + 1;
@@ -216,9 +218,9 @@ function encodePng(pixels, width, height, components) {
 
 /** Розміри з IHDR. Єдине джерело істини про пікселі відповіді провайдера. */
 function readPngSize(png) {
-    if (png.length < 24) throw new Error('Відповідь провайдера надто коротка для PNG');
+    if (png.length < 24) throw new Error(pngI18n.t('png.tooShort'));
     for (let i = 0; i < 8; i++) {
-        if (png[i] !== PNG_SIG[i]) throw new Error('Відповідь провайдера — не PNG');
+        if (png[i] !== PNG_SIG[i]) throw new Error(pngI18n.t('png.invalid'));
     }
     const rd = o => ((png[o] << 24) | (png[o + 1] << 16) | (png[o + 2] << 8) | png[o + 3]) >>> 0;
     return { w: rd(16), h: rd(20) };
@@ -288,7 +290,7 @@ function buildRectMaskPng(width, height, rect, feather = 0) {
     const T = Math.max(0, Math.round(rect.top));
     const R = Math.min(width, Math.round(rect.right));
     const B = Math.min(height, Math.round(rect.bottom));
-    if (R <= L || B <= T) throw new Error('Порожній прямокутник маски');
+    if (R <= L || B <= T) throw new Error(pngI18n.t('png.emptyMask'));
 
     // ширший за півобласть градієнт з'їв би її цілком — тоді «змінити» не
     // залишиться взагалі, і модель повернула б вхід без змін

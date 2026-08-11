@@ -1,7 +1,7 @@
 /* Генерує тестові PNG НАШИМ png.js — заодно перевірка deflate проти декодера Photoshop. */
 const fs = require('fs');
 const path = require('path');
-const { encodePng, setPngResolution, buildRectMaskPng, readPngSize } = require('/Users/zg.mrclick/ai-image-ps/png.js');
+const { encodePng, setPngResolution, buildRectMaskPng, readPngSize } = require('../png.js');
 
 const OUT = process.argv[2] || '.';
 fs.mkdirSync(OUT, { recursive: true });
