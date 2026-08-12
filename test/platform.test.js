@@ -20,6 +20,7 @@ test('public metadata and manifest stay aligned', () => {
     assert.equal(manifest.version, appInfo.version);
     assert.equal(manifest.name, 'ExactFill');
     assert.equal(appInfo.name, 'ExactFill');
+    assert.equal(appInfo.supportUrl, 'https://ko-fi.com/havryil89140');
     assert.equal(manifest.id, appInfo.id, 'plugin id must stay stable so private-build settings survive');
     assert.match(appInfo.repository, /zgmrclick\/exactfill-photoshop$/);
     assert.equal(manifest.manifestVersion, 5);
@@ -166,4 +167,11 @@ test('public demo ships a lightweight accessible comparison and real video', () 
     assert.match(html, /assets\/exactfill-demo\.mp4/);
     assert.ok(fs.statSync(video).size < 5 * 1024 * 1024, 'demo video should remain GitHub-friendly');
     assert.match(readme, /zgmrclick\.github\.io\/exactfill-photoshop/);
+    assert.match(html, /https:\/\/ko-fi\.com\/havryil89140/);
+    assert.match(readme, /https:\/\/ko-fi\.com\/havryil89140/);
+});
+
+test('GitHub Sponsor button points to the ExactFill Ko-fi page', () => {
+    const funding = fs.readFileSync(path.join(ROOT, '.github', 'FUNDING.yml'), 'utf8');
+    assert.equal(funding.trim(), 'ko_fi: havryil89140');
 });

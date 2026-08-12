@@ -33,7 +33,7 @@ uses a real selection and shows the generated result returned as a precisely pla
 
 ## Install
 
-Download `ExactFill-1.3.1.zip` from [Releases](https://github.com/zgmrclick/exactfill-photoshop/releases),
+Download `ExactFill-1.3.2.zip` from [Releases](https://github.com/zgmrclick/exactfill-photoshop/releases),
 extract it completely, and close Photoshop before copying the folder.
 
 ### Windows
@@ -119,8 +119,9 @@ See [Support](SUPPORT.md), [Security](SECURITY.md), and
 
 ## Support the project
 
-A donation link will be added after the public launch. For now, a star, a useful
-bug report, a short demo, or sharing ExactFill with another Photoshop user helps.
+ExactFill is free and open source. If it saves you time, you can
+[support its development on Ko-fi](https://ko-fi.com/havryil89140). A star, a useful
+bug report, a short demo, or sharing ExactFill with another Photoshop user also helps.
 
 ## Development
 

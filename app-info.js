@@ -2,11 +2,11 @@
 const APP_INFO = Object.freeze({
     id: 'ai-image-ps',
     name: 'ExactFill',
-    version: '1.3.1',
+    version: '1.3.2',
     repository: 'https://github.com/zgmrclick/exactfill-photoshop',
     issues: 'https://github.com/zgmrclick/exactfill-photoshop/issues/new',
     privacy: 'https://github.com/zgmrclick/exactfill-photoshop/blob/master/PRIVACY.md',
-    supportUrl: '',
+    supportUrl: 'https://ko-fi.com/havryil89140',
 });
 
 module.exports = APP_INFO;

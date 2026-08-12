@@ -1,4 +1,4 @@
-/* Language, privacy, support placeholder and safe GitHub bug reporting. */
+/* Language, privacy, project support and safe GitHub bug reporting. */
 const publicAppInfo = require('./app-info.js');
 const publicI18n = require('./i18n.js');
 
@@ -78,7 +78,9 @@ if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded
     if (support) {
         support.disabled = !publicAppInfo.supportUrl;
         support.addEventListener('click', async () => {
-            if (publicAppInfo.supportUrl) await openExternal(publicAppInfo.supportUrl, 'Open the ExactFill support page');
+            if (!publicAppInfo.supportUrl) return;
+            try { await openExternal(publicAppInfo.supportUrl, publicI18n.t('support.consent')); }
+            catch (e) { setReportStatus(publicI18n.t('report.openError', { error: e?.message || e })); }
         });
     }
 

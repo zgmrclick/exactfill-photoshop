@@ -22,8 +22,9 @@
         window.open = url => { window.__openedExactFillUrl = url; return null; };
         window.require = name => {
             if (name === './app-info.js') return {
-                version: '1.3.1', issues: 'https://github.com/zgmrclick/exactfill-photoshop/issues/new',
-                privacy: 'https://github.com/zgmrclick/exactfill-photoshop/blob/master/PRIVACY.md', supportUrl: ''
+                version: '1.3.2', issues: 'https://github.com/zgmrclick/exactfill-photoshop/issues/new',
+                privacy: 'https://github.com/zgmrclick/exactfill-photoshop/blob/master/PRIVACY.md',
+                supportUrl: 'https://ko-fi.com/havryil89140'
             };
             if (name === './i18n.js') return window.exactFillI18n;
             if (name === 'uxp') return { host: { name: 'Photoshop', version: '27.5.0', uiLocale: 'en_US' },
@@ -120,7 +121,7 @@
             <p class="hint privacy-note" data-i18n="privacy.note">Keys stay in Photoshop secure storage.</p>
             <div class="row footer-actions">
                 <sp-button id="privacy-btn" data-i18n="privacy.open">Privacy</sp-button>
-                <sp-button id="support-btn" disabled data-i18n="support.comingSoon">Support ExactFill — coming soon</sp-button>
+                <sp-button id="support-btn" data-i18n="support.open">Support ExactFill</sp-button>
             </div>
         </div>
     </div>
