@@ -113,7 +113,6 @@ body {
     line-height: 1.25;
 }
 .field-head .field-title { margin-bottom: 0; font-size: 12px; }
-.shortcut { flex: 0 0 auto; color: var(--fg-dim); font-size: 9px; }
 
 #prompt-input,
 #report-summary,
@@ -503,7 +502,6 @@ sp-slider { width: 100%; }
 @media (max-width: 245px) {
     .panel-scroll { padding: 8px; }
     .brand-copy span { display: none; }
-    .shortcut { display: none; }
     .seg-btn { font-size: 9px; }
     .usage-summary { flex-direction: column; }
     .footer-actions sp-button { flex: 1 1 auto; }

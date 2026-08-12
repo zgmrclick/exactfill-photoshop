@@ -29,6 +29,17 @@ test('public metadata and manifest stay aligned', () => {
     assert.deepEqual(manifest.entrypoints?.[0]?.preferredDockedSize, { width: 300, height: 600 });
     assert.deepEqual(manifest.entrypoints?.[0]?.preferredFloatingSize, { width: 320, height: 680 });
     assert.equal(manifest.icons?.[0]?.path, 'icons/exactfill.svg');
+    assert.deepEqual(manifest.entrypoints?.[0]?.icons?.map(icon => icon.path),
+        ['icons/panel-dark.png', 'icons/panel-light.png']);
+    assert.deepEqual(manifest.entrypoints?.[0]?.icons?.map(icon => icon.scale), [[1, 2], [1, 2]]);
+    for (const [file, size] of [['panel-dark@1x.png', 23], ['panel-dark@2x.png', 46],
+                                ['panel-light@1x.png', 23], ['panel-light@2x.png', 46]]) {
+        const png = fs.readFileSync(path.join(ROOT, 'icons', file));
+        assert.equal(png.subarray(1, 4).toString(), 'PNG', `${file} must be a PNG`);
+        assert.equal(png.readUInt32BE(16), size, `${file} width`);
+        assert.equal(png.readUInt32BE(20), size, `${file} height`);
+        assert.equal(png[25], 6, `${file} must use RGBA truecolor, like Photoshop's native panel icons`);
+    }
 });
 
 test('manifest v5 has the same permissions on macOS and Windows', () => {
@@ -93,10 +104,14 @@ test('panel has an owned vertical scroll region and accessible disclosures', () 
 test('critical panel controls use deterministic UXP-safe markup', () => {
     const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
     const css = fs.readFileSync(path.join(ROOT, 'style.css'), 'utf8');
+    const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
     assert.match(html, /id="generate-btn" type="button" class="action-btn primary-btn/);
     assert.match(html, /id="plan-card" class="plan-card dim"/);
     assert.match(html, /class="advanced-stack"/);
     assert.match(html, /<svg class="chevron"/);
+    assert.doesNotMatch(html, /prompt\.shortcut|⌘\/Ctrl/);
+    assert.doesNotMatch(css, /\.shortcut\s*\{/);
+    assert.doesNotMatch(main, /metaKey|ctrlKey/);
     assert.match(css, /\.control-grid\s*\{[^}]*display:\s*flex/s);
     assert.doesNotMatch(css, /\.control-grid\s*\{[^}]*display:\s*grid/s);
     assert.doesNotMatch(css, /\.chevron\s*\{[^}]*border-(?:right|bottom):/s);
@@ -110,6 +125,7 @@ test('macOS development deploy excludes non-runtime content', () => {
     }
     assert.match(sh, /Plugins → ExactFill/);
     assert.match(sh, /--include 'icons\/exactfill\.svg'/);
+    assert.match(sh, /--include 'icons\/panel-\*\.png'/);
     assert.match(sh, /--exclude 'icons\/\*'/);
     assert.match(sh, /--exclude 'verify-assumptions\.psjs'/);
 });
@@ -132,6 +148,9 @@ test('release builder whitelists every runtime module', () => {
     const script = fs.readFileSync(path.join(ROOT, 'scripts/build-release.sh'), 'utf8');
     for (const file of [...runtimeFiles, 'index.html', 'style.css', 'manifest.json', 'icons/exactfill.svg']) {
         assert.match(script, new RegExp(file.replace(/[./-]/g, '\\$&')), `build omits ${file}`);
+    }
+    for (const file of ['panel-dark@1x.png', 'panel-dark@2x.png', 'panel-light@1x.png', 'panel-light@2x.png']) {
+        assert.match(script, new RegExp(file.replace(/[.@-]/g, '\\$&')), `build omits icons/${file}`);
     }
 });
 

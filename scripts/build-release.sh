@@ -25,10 +25,14 @@ ROOT_FILES=(
 PROVIDER_FILES=(
     providers/google.js providers/http.js providers/index.js providers/openai.js
 )
+PANEL_ICON_FILES=(
+    panel-dark@1x.png panel-dark@2x.png panel-light@1x.png panel-light@2x.png
+)
 
 for file in "${ROOT_FILES[@]}"; do cp "$ROOT/$file" "$BUILD_ROOT/ExactFill/$file"; done
 for file in "${PROVIDER_FILES[@]}"; do cp "$ROOT/$file" "$BUILD_ROOT/ExactFill/$file"; done
 cp "$ROOT/icons/exactfill.svg" "$BUILD_ROOT/ExactFill/icons/exactfill.svg"
+for file in "${PANEL_ICON_FILES[@]}"; do cp "$ROOT/icons/$file" "$BUILD_ROOT/ExactFill/icons/$file"; done
 cp "$ROOT/INSTALL.txt" "$BUILD_ROOT/INSTALL.txt"
 
 rm -f "$ARCHIVE"

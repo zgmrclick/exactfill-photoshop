@@ -1016,12 +1016,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (abortCtrl) { abortCtrl.abort(); setStatus(mainI18n.t('status.cancelling')); }
     });
 
-    // Cmd+Enter / Ctrl+Enter — генерувати; Esc — скасувати
+    // Esc — скасувати активний запит.
     document.addEventListener('keydown', e => {
-        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-            e.preventDefault();
-            onGenerate(false);
-        } else if (e.key === 'Escape' && busy && abortCtrl) {
+        if (e.key === 'Escape' && busy && abortCtrl) {
             e.preventDefault();
             abortCtrl.abort();
             setStatus(mainI18n.t('status.cancelling'));

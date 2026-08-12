@@ -1,6 +1,6 @@
 {
   "name": "exactfill-photoshop",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "Free open-source Photoshop plugin for exact AI edits with your own OpenAI and Google Gemini API keys.",
   "main": "index.html",
   "scripts": {

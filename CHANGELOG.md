@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.1 — 2026-08-12
+
+- Added theme-aware 23 px and 46 px PNG panel icons so minimized Photoshop toolbars show the ExactFill mark instead of the generic fallback.
+- Removed the non-functional Cmd/Ctrl+Enter prompt shortcut and its misleading UI hint.
+
 ## 1.3.0 — 2026-08-12
 
 - Added a dedicated vertical scroll region that keeps the ExactFill header visible.

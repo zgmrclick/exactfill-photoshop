@@ -5,7 +5,7 @@ const { buildReportUrl, safeDiagnostics } = require('../public-ui.js');
 
 test('safe diagnostics contain useful metadata but no private content', () => {
     const diagnostics = safeDiagnostics();
-    assert.match(diagnostics, /ExactFill: 1\.3\.0/);
+    assert.match(diagnostics, /ExactFill: 1\.3\.1/);
     assert.match(diagnostics, /Provider:/);
     assert.doesNotMatch(diagnostics, /api.?key|prompt|document name|file path/i);
 });

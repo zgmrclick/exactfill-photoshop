@@ -9,7 +9,7 @@ set -e
 
 DEST="/Applications/Adobe Photoshop 2026/Plug-ins/AiImagePS"
 SRC="$(cd "$(dirname "$0")" && pwd)"
-EXCL=(--include 'icons/exactfill.svg' --exclude 'icons/*'
+EXCL=(--include 'icons/exactfill.svg' --include 'icons/panel-*.png' --exclude 'icons/*'
       --exclude '.git' --exclude 'test' --exclude 'CONTRACTS.md'
       --exclude 'deploy.sh' --exclude 'INSTALL.txt'
       --exclude 'README.md' --exclude 'README.uk.md' --exclude 'LICENSE'
