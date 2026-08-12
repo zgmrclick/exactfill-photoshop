@@ -12,6 +12,14 @@ ExactFill — безкоштовний плагін Photoshop із відкри�
 > Без реєстрації, сервера ExactFill і внутрішніх кредитів. Ви платите напряму
 > AI-провайдеру й бачите оцінку витрат API у самому плагіні.
 
+## Демо
+
+[![ExactFill додає сідло й вершницю у Photoshop](docs/assets/demo-after.jpg)](https://zgmrclick.github.io/exactfill-photoshop/)
+
+Спробуйте [інтерактивне порівняння до/після](https://zgmrclick.github.io/exactfill-photoshop/)
+або подивіться [22-секундний запис Photoshop](docs/assets/exactfill-demo.mp4). Демо
+використовує справжнє виділення й показує результат як точно розміщений шар.
+
 ## Чому ExactFill
 
 - Точне розміщення в початковому виділенні, включно з непарними й дробовими межами.
@@ -25,7 +33,7 @@ ExactFill — безкоштовний плагін Photoshop із відкри�
 
 ## Встановлення
 
-Завантажте `ExactFill-1.2.1.zip` зі сторінки
+Завантажте `ExactFill-1.3.0.zip` зі сторінки
 [Releases](https://github.com/zgmrclick/exactfill-photoshop/releases), повністю
 розпакуйте архів і закрийте Photoshop.
 

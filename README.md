@@ -12,6 +12,14 @@ Photoshop layer mask.
 > No account, no ExactFill server, no credit packs. You pay the AI provider
 > directly and can see estimated API costs inside the plugin.
 
+## Demo
+
+[![ExactFill adding a saddle and rider inside Photoshop](docs/assets/demo-after.jpg)](https://zgmrclick.github.io/exactfill-photoshop/)
+
+Try the [interactive before/after comparison](https://zgmrclick.github.io/exactfill-photoshop/)
+or watch the [22-second Photoshop recording](docs/assets/exactfill-demo.mp4). The demo
+uses a real selection and shows the generated result returned as a precisely placed layer.
+
 ## Why ExactFill
 
 - Precise placement in the original selection, including odd and fractional bounds.
@@ -25,7 +33,7 @@ Photoshop layer mask.
 
 ## Install
 
-Download `ExactFill-1.2.1.zip` from [Releases](https://github.com/zgmrclick/exactfill-photoshop/releases),
+Download `ExactFill-1.3.0.zip` from [Releases](https://github.com/zgmrclick/exactfill-photoshop/releases),
 extract it completely, and close Photoshop before copying the folder.
 
 ### Windows

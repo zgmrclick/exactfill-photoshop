@@ -3,24 +3,26 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ExactFill UI Harness</title>
     <link rel="stylesheet" href="../style.css">
     <style>
         html { background: #323232; }
-        body { width: 280px; min-height: 520px; margin: 20px auto; font-family: Arial, sans-serif; }
+        body { width: calc(100vw - 20px); max-width: 300px; height: 680px; min-height: 0; margin: 10px auto; font-family: Arial, sans-serif; border: 1px solid #555; }
+        body.narrow-harness { width: 210px; }
         #main { display: block !important; }
         sp-button, sp-checkbox { display: inline-block; }
         sp-button { padding: 6px 9px; border-radius: 4px; background: #4b4b4b; cursor: pointer; }
         sp-button[variant="cta"] { color: white; background: #1473e6; }
         sp-button[disabled] { opacity: .5; cursor: default; }
         sp-checkbox { margin: 3px 0; }
-        .mock-picker { flex: 1; padding: 6px; color: #eee; background: #454545; border: 1px solid #666; border-radius: 4px; }
+        .mock-picker { width: 100%; box-sizing: border-box; padding: 7px 8px; color: #eee; background: #454545; border: 1px solid #666; border-radius: 4px; }
     </style>
     <script>
         window.__openedExactFillUrl = '';
         window.open = url => { window.__openedExactFillUrl = url; return null; };
         window.require = name => {
             if (name === './app-info.js') return {
-                version: '1.2.1', issues: 'https://github.com/zgmrclick/exactfill-photoshop/issues/new',
+                version: '1.3.0', issues: 'https://github.com/zgmrclick/exactfill-photoshop/issues/new',
                 privacy: 'https://github.com/zgmrclick/exactfill-photoshop/blob/master/PRIVACY.md', supportUrl: ''
             };
             if (name === './i18n.js') return window.exactFillI18n;
@@ -41,39 +43,62 @@
         <span id="app-version" class="version"></span>
     </header>
 
-    <div id="main">
-        <textarea id="prompt-input" rows="3" data-i18n-placeholder="prompt.placeholder"
-                  placeholder="What should change in the selected area?"></textarea>
-        <div class="row">
-            <label class="lbl" data-i18n="field.provider">Provider</label>
+    <div id="main" class="panel-scroll">
+        <section class="primary-workflow">
+        <div class="field-head">
+            <label class="field-title" data-i18n="prompt.label">What should change?</label>
+            <span class="shortcut" data-i18n="prompt.shortcut">⌘/Ctrl ↵</span>
+        </div>
+        <textarea id="prompt-input" rows="4" data-i18n-placeholder="prompt.placeholder"
+                  placeholder="Describe the change in the selected area"></textarea>
+        <div class="control-grid">
+        <div class="control-stack">
+            <label class="field-title" data-i18n="field.provider">Provider</label>
             <div class="mock-picker">OpenAI⌄</div>
         </div>
-        <div class="row">
-            <label class="lbl" data-i18n="field.model">Model</label>
+        <div class="control-stack">
+            <label class="field-title" data-i18n="field.model">Model</label>
             <div class="mock-picker">GPT Image 2⌄</div>
         </div>
-        <div class="field">
-            <label class="lbl" data-i18n="field.quality">Quality</label>
+        </div>
+        <div class="field quality-field">
+            <label class="field-title" data-i18n="field.quality">Quality</label>
             <div class="seg">
-                <button class="seg-btn" data-i18n="quality.auto">Auto</button>
                 <button class="seg-btn" data-i18n="quality.low">Low</button>
                 <button class="seg-btn active" data-i18n="quality.medium">Medium</button>
                 <button class="seg-btn" data-i18n="quality.high">High</button>
+                <button class="seg-btn" data-i18n="quality.auto">Auto</button>
             </div>
         </div>
-        <p class="plan">Request: edit · input PNG · selection 1024×1024</p>
-        <div class="row gen-row"><sp-button variant="cta" class="grow" data-i18n="action.generate">Generate</sp-button></div>
+        <div class="plan-card">
+            <span class="plan-icon"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"></circle><path d="M6.7 10.2l2.1 2.1 4.6-4.8"></path></svg></span>
+            <span class="plan-copy"><strong data-i18n="plan.readyTitle">Ready to generate</strong><span>Request: 1024×1024 · input PNG · selection 1024×1024</span></span>
+        </div>
+        <div class="action-group">
+            <div class="row gen-row"><button class="action-btn primary-btn grow"><svg viewBox="0 0 20 20"><path d="M10 2.8l1.1 3.1L14.2 7l-3.1 1.1L10 11.2 8.9 8.1 5.8 7l3.1-1.1L10 2.8z"></path></svg><span data-i18n="action.generate">Generate</span></button></div>
+            <button class="action-btn secondary-btn regen-btn" disabled data-i18n="action.regenerate">Regenerate</button>
+        </div>
+        </section>
 
+        <div class="advanced-label" data-i18n="advanced.title">Tools and settings</div>
+
+        <div class="advanced-stack">
         <div class="section collapsible">
-            <div class="head"><span data-i18n="options.title">Area and edge settings</span></div>
-            <div class="body checks">
+            <div class="head" aria-expanded="false"><span class="head-label"><svg class="section-icon" viewBox="0 0 20 20"><path d="M6 3.5v11A1.5 1.5 0 0 0 7.5 16H16M3.5 6H14A1.5 1.5 0 0 1 15.5 7.5V16"></path></svg><span data-i18n="options.title">Area and edge settings</span></span><svg class="chevron" viewBox="0 0 20 20"><path d="M6.5 8l3.5 3.5L13.5 8"></path></svg></div>
+            <div class="body checks hidden">
                 <sp-checkbox data-i18n="options.lossless">Lossless input</sp-checkbox>
                 <sp-checkbox data-i18n="options.livePreview">Live preview</sp-checkbox>
             </div>
         </div>
 
+        <div class="section collapsible"><div class="head" aria-expanded="false"><span class="head-label"><svg class="section-icon" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"></circle></svg><span data-i18n="usage.title">API cost statistics</span></span><svg class="chevron" viewBox="0 0 20 20"><path d="M6.5 8l3.5 3.5L13.5 8"></path></svg></div></div>
+        <div class="section collapsible"><div class="head" aria-expanded="false"><span class="head-label"><svg class="section-icon" viewBox="0 0 20 20"><rect x="3" y="4" width="14" height="12" rx="2"></rect></svg><span data-i18n="refs.title">Reference images</span></span><svg class="chevron" viewBox="0 0 20 20"><path d="M6.5 8l3.5 3.5L13.5 8"></path></svg></div></div>
+        <div class="section collapsible"><div class="head" aria-expanded="false"><span class="head-label"><svg class="section-icon" viewBox="0 0 20 20"><ellipse cx="10" cy="6" rx="6" ry="2.5"></ellipse></svg><span data-i18n="cache.title">Result cache</span></span><svg class="chevron" viewBox="0 0 20 20"><path d="M6.5 8l3.5 3.5L13.5 8"></path></svg></div></div>
+        <div class="section collapsible"><div class="head" aria-expanded="false"><span class="head-label"><svg class="section-icon" viewBox="0 0 20 20"><path d="M5 3.5h10v13l-5-3-5 3z"></path></svg><span data-i18n="presets.title">Prompt presets</span></span><svg class="chevron" viewBox="0 0 20 20"><path d="M6.5 8l3.5 3.5L13.5 8"></path></svg></div></div>
+        <div class="section collapsible"><div class="head" aria-expanded="false"><span class="head-label"><svg class="section-icon" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"></circle></svg><span data-i18n="history.title">History</span></span><svg class="chevron" viewBox="0 0 20 20"><path d="M6.5 8l3.5 3.5L13.5 8"></path></svg></div></div>
+
         <div class="section collapsible">
-            <div id="report-header" class="head"><span data-i18n="report.title">Report a bug</span></div>
+            <div id="report-header" class="head" aria-expanded="false"><span class="head-label"><svg class="section-icon" viewBox="0 0 20 20"><circle cx="10" cy="10" r="6"></circle></svg><span data-i18n="report.title">Report a bug</span></span><svg class="chevron" viewBox="0 0 20 20"><path d="M6.5 8l3.5 3.5L13.5 8"></path></svg></div>
             <div id="report-body" class="body hidden">
                 <p class="hint" data-i18n="report.hint">Describe what happened.</p>
                 <textarea id="report-summary" rows="2" data-i18n-placeholder="report.summary"></textarea>
@@ -82,6 +107,7 @@
                 <sp-button id="report-submit" data-i18n="report.submit">Open GitHub issue</sp-button>
                 <p id="report-status" class="status"></p>
             </div>
+        </div>
         </div>
 
         <div class="section public-footer">
@@ -104,8 +130,12 @@
     <script src="../public-ui.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            document.getElementById('report-header').addEventListener('click', () =>
-                document.getElementById('report-body').classList.toggle('hidden'));
+            if (new URLSearchParams(location.search).get('width') === '230') document.body.classList.add('narrow-harness');
+            document.getElementById('report-header').addEventListener('click', event => {
+                const body = document.getElementById('report-body');
+                body.classList.toggle('hidden');
+                event.currentTarget.setAttribute('aria-expanded', body.classList.contains('hidden') ? 'false' : 'true');
+            });
         });
     </script>
 </body>

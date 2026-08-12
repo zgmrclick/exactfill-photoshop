@@ -25,6 +25,9 @@ test('public metadata and manifest stay aligned', () => {
     assert.equal(manifest.manifestVersion, 5);
     assert.equal(manifest.host?.minVersion, '25.0.0');
     assert.equal(manifest.entrypoints?.[0]?.label?.default, 'ExactFill');
+    assert.deepEqual(manifest.entrypoints?.[0]?.minimumSize, { width: 230, height: 260 });
+    assert.deepEqual(manifest.entrypoints?.[0]?.preferredDockedSize, { width: 300, height: 600 });
+    assert.deepEqual(manifest.entrypoints?.[0]?.preferredFloatingSize, { width: 320, height: 680 });
     assert.equal(manifest.icons?.[0]?.path, 'icons/exactfill.svg');
 });
 
@@ -75,6 +78,30 @@ test('HTML scripts do not redeclare top-level UXP globals', () => {
     }
 });
 
+test('panel has an owned vertical scroll region and accessible disclosures', () => {
+    const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+    const css = fs.readFileSync(path.join(ROOT, 'style.css'), 'utf8');
+    const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
+    assert.match(html, /id="main" class="panel-scroll hidden"/);
+    assert.match(css, /\.panel-scroll\s*\{[^}]*overflow-y:\s*auto/s);
+    assert.match(css, /body\s*\{[^}]*overflow:\s*hidden/s);
+    assert.match(html, /role="button" tabindex="0" aria-controls="opts-body"/);
+    assert.match(main, /setAttribute\('aria-expanded'/);
+    assert.match(main, /e\.key === 'Enter' \|\| e\.key === ' '/);
+});
+
+test('critical panel controls use deterministic UXP-safe markup', () => {
+    const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+    const css = fs.readFileSync(path.join(ROOT, 'style.css'), 'utf8');
+    assert.match(html, /id="generate-btn" type="button" class="action-btn primary-btn/);
+    assert.match(html, /id="plan-card" class="plan-card dim"/);
+    assert.match(html, /class="advanced-stack"/);
+    assert.match(html, /<svg class="chevron"/);
+    assert.match(css, /\.control-grid\s*\{[^}]*display:\s*flex/s);
+    assert.doesNotMatch(css, /\.control-grid\s*\{[^}]*display:\s*grid/s);
+    assert.doesNotMatch(css, /\.chevron\s*\{[^}]*border-(?:right|bottom):/s);
+});
+
 test('macOS development deploy excludes non-runtime content', () => {
     const sh = fs.readFileSync(path.join(ROOT, 'deploy.sh'), 'utf8');
     for (const nonRuntime of ['INSTALL.txt', 'README.md', 'README.uk.md', 'package.json',
@@ -106,4 +133,18 @@ test('release builder whitelists every runtime module', () => {
     for (const file of [...runtimeFiles, 'index.html', 'style.css', 'manifest.json', 'icons/exactfill.svg']) {
         assert.match(script, new RegExp(file.replace(/[./-]/g, '\\$&')), `build omits ${file}`);
     }
+});
+
+test('public demo ships a lightweight accessible comparison and real video', () => {
+    const html = fs.readFileSync(path.join(ROOT, 'docs/index.html'), 'utf8');
+    const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
+    const video = path.join(ROOT, 'docs/assets/exactfill-demo.mp4');
+    for (const file of ['demo-before.jpg', 'demo-generating.jpg', 'demo-after.jpg']) {
+        assert.ok(fs.statSync(path.join(ROOT, 'docs/assets', file)).size > 0, `${file} is empty`);
+    }
+    assert.match(html, /type="range"[^>]*aria-label="Reveal before or after image"/);
+    assert.match(html, /<video controls playsinline/);
+    assert.match(html, /assets\/exactfill-demo\.mp4/);
+    assert.ok(fs.statSync(video).size < 5 * 1024 * 1024, 'demo video should remain GitHub-friendly');
+    assert.match(readme, /zgmrclick\.github\.io\/exactfill-photoshop/);
 });

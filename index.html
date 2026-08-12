@@ -15,7 +15,7 @@
     <span id="app-version" class="version"></span>
 </header>
 
-<div id="auth" class="section hidden">
+<div id="auth" class="panel-scroll auth-panel hidden">
     <p class="hint">
         <span data-i18n="auth.needKey">An API key is required for</span>
         <b id="auth-provider-label">provider</b>.
@@ -27,53 +27,77 @@
     <p id="auth-status" class="status"></p>
 </div>
 
-<div id="main" class="hidden">
-    <textarea id="prompt-input" rows="3"
-              placeholder="What should change in the selected area?  (Cmd/Ctrl+Enter to generate)"
-              data-i18n-placeholder="prompt.placeholder"></textarea>
+<div id="main" class="panel-scroll hidden">
+    <section class="primary-workflow" aria-labelledby="prompt-label">
+        <div class="field-head">
+            <label id="prompt-label" for="prompt-input" class="field-title" data-i18n="prompt.label">What should change?</label>
+            <span class="shortcut" data-i18n="prompt.shortcut">⌘/Ctrl ↵</span>
+        </div>
+        <textarea id="prompt-input" rows="4"
+                  placeholder="Describe the change in the selected area"
+                  data-i18n-placeholder="prompt.placeholder"></textarea>
 
-    <div class="row">
-        <label class="lbl" data-i18n="field.provider">Provider</label>
-        <sp-picker id="provider-select" size="s" class="grow"></sp-picker>
-    </div>
+        <div class="control-grid">
+            <div class="control-stack">
+                <label class="field-title" data-i18n="field.provider">Provider</label>
+                <sp-picker id="provider-select" size="s" class="grow"></sp-picker>
+            </div>
 
-    <div class="row">
-        <label class="lbl" data-i18n="field.model">Model</label>
-        <sp-picker id="model-select" size="s" class="grow"></sp-picker>
-    </div>
+            <div class="control-stack">
+                <label class="field-title" data-i18n="field.model">Model</label>
+                <sp-picker id="model-select" size="s" class="grow"></sp-picker>
+            </div>
+        </div>
 
-    <div class="field">
-        <label class="lbl" data-i18n="field.quality">Quality</label>
-        <div id="quality-toggle" class="seg"></div>
-    </div>
+        <div class="field quality-field">
+            <label class="field-title" data-i18n="field.quality">Quality</label>
+            <div id="quality-toggle" class="seg" role="group" aria-label="Quality"></div>
+        </div>
 
-    <p id="plan-line" class="plan"></p>
+        <div id="plan-card" class="plan-card dim" aria-live="polite">
+            <span class="plan-icon" aria-hidden="true">
+                <svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"></circle><path class="plan-check" d="M6.7 10.2l2.1 2.1 4.6-4.8"></path><path class="plan-alert" d="M10 6.5v4.2M10 13.7h.01"></path></svg>
+            </span>
+            <span class="plan-copy">
+                <strong id="plan-title" data-i18n="plan.notReadyTitle">Not ready</strong>
+                <span id="plan-line"></span>
+            </span>
+        </div>
 
-    <div class="row gen-row">
-        <sp-button id="generate-btn" variant="cta" class="grow" data-i18n="action.generate">Generate</sp-button>
-        <sp-button id="cancel-btn" size="s" variant="secondary" class="hidden"
-                   data-i18n="action.cancel">Cancel</sp-button>
-        <div id="spinner" class="spinner hidden"></div>
-    </div>
-    <div class="row">
-        <sp-button id="regen-btn" size="s" quiet class="grow" disabled
-            title="Same prompt and area, without making a new selection"
-            data-i18n="action.regenerate" data-i18n-title="action.regenerateTitle">Regenerate</sp-button>
-    </div>
+        <div class="action-group">
+            <div class="row gen-row">
+                <button id="generate-btn" type="button" class="action-btn primary-btn grow">
+                    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.8l1.1 3.1L14.2 7l-3.1 1.1L10 11.2 8.9 8.1 5.8 7l3.1-1.1L10 2.8z"></path><path d="M15.5 11.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7.7-1.8z"></path></svg>
+                    <span data-i18n="action.generate">Generate</span>
+                </button>
+                <button id="cancel-btn" type="button" class="action-btn secondary-btn hidden"
+                        data-i18n="action.cancel">Cancel</button>
+                <div id="spinner" class="spinner hidden" aria-hidden="true"></div>
+            </div>
+            <button id="regen-btn" type="button" class="action-btn secondary-btn regen-btn" disabled
+                title="Same prompt and area, without making a new selection"
+                data-i18n="action.regenerate" data-i18n-title="action.regenerateTitle">Regenerate</button>
+        </div>
 
-    <p id="status-text" class="status"></p>
-    <p id="residual-text" class="residual"></p>
+        <div id="status-region" class="status-region" aria-live="polite">
+            <p id="status-text" class="status"></p>
+            <p id="residual-text" class="residual"></p>
+        </div>
 
-    <div id="preview-wrap" class="preview hidden">
-        <img id="preview-img" alt="Preview">
-    </div>
+        <div id="preview-wrap" class="preview hidden">
+            <img id="preview-img" alt="Preview">
+        </div>
 
-    <p id="cost-line" class="cost hidden"></p>
+        <p id="cost-line" class="cost hidden"></p>
+    </section>
 
+    <div class="advanced-label" data-i18n="advanced.title">Tools and settings</div>
+
+    <div class="advanced-stack">
     <div class="section collapsible">
-        <div id="usage-header" class="head">
-            <span data-i18n="usage.title">API cost statistics</span>
-            <span id="usage-badge" class="badge hidden"></span>
+        <div id="usage-header" class="head" role="button" tabindex="0" aria-controls="usage-body">
+            <span class="head-label"><svg class="section-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"></circle><path d="M12.6 7.2c-.6-.5-1.4-.7-2.3-.7-1.3 0-2.2.6-2.2 1.5 0 2.2 4.5 1.1 4.5 3.6 0 1-.9 1.8-2.5 1.8-.9 0-1.8-.3-2.5-.9M10 5.2v9.6"></path></svg><span data-i18n="usage.title">API cost statistics</span></span>
+            <span class="head-trailing"><span id="usage-badge" class="badge hidden"></span><svg class="chevron" viewBox="0 0 20 20" aria-hidden="true"><path d="M6.5 8l3.5 3.5L13.5 8"></path></svg></span>
         </div>
         <div id="usage-body" class="body hidden">
             <div id="usage-summary" class="usage-summary"></div>
@@ -85,8 +109,8 @@
     </div>
 
     <div class="section collapsible">
-        <div id="opts-header" class="head"><span data-i18n="options.title">Area and edge settings</span></div>
-        <div id="opts-body" class="body">
+        <div id="opts-header" class="head" role="button" tabindex="0" aria-controls="opts-body"><span class="head-label"><svg class="section-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 3.5v11A1.5 1.5 0 0 0 7.5 16H16M3.5 6H14A1.5 1.5 0 0 1 15.5 7.5V16"></path></svg><span data-i18n="options.title">Area and edge settings</span></span><svg class="chevron" viewBox="0 0 20 20" aria-hidden="true"><path d="M6.5 8l3.5 3.5L13.5 8"></path></svg></div>
+        <div id="opts-body" class="body hidden">
             <div class="field">
                 <sp-slider id="context-pad" min="0" max="50" step="5" value="15" value-label="%"
                            title="How much surrounding content to send to the model"
@@ -119,8 +143,8 @@
     </div>
 
     <div class="section collapsible">
-        <div id="ref-header" class="head">
-            <span data-i18n="refs.title">Reference images</span><span id="ref-count" class="badge hidden"></span>
+        <div id="ref-header" class="head" role="button" tabindex="0" aria-controls="ref-body">
+            <span class="head-label"><svg class="section-icon" viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="4" width="14" height="12" rx="2"></rect><circle cx="7" cy="8" r="1.3"></circle><path d="M4.5 14l3.4-3.4 2.6 2 2.3-2.3 2.7 3.7"></path></svg><span data-i18n="refs.title">Reference images</span></span><span class="head-trailing"><span id="ref-count" class="badge hidden"></span><svg class="chevron" viewBox="0 0 20 20" aria-hidden="true"><path d="M6.5 8l3.5 3.5L13.5 8"></path></svg></span>
         </div>
         <div id="ref-body" class="body hidden">
             <p class="hint" data-i18n="refs.hint">Style or product references. Your selected area is always first.</p>
@@ -133,8 +157,8 @@
     </div>
 
     <div class="section collapsible">
-        <div id="cache-header" class="head">
-            <span data-i18n="cache.title">Result cache</span><span id="cache-badge" class="badge hidden"></span>
+        <div id="cache-header" class="head" role="button" tabindex="0" aria-controls="cache-body">
+            <span class="head-label"><svg class="section-icon" viewBox="0 0 20 20" aria-hidden="true"><ellipse cx="10" cy="5.5" rx="6.5" ry="2.5"></ellipse><path d="M3.5 5.5v4c0 1.4 2.9 2.5 6.5 2.5s6.5-1.1 6.5-2.5v-4M3.5 9.5v4c0 1.4 2.9 2.5 6.5 2.5s6.5-1.1 6.5-2.5v-4"></path></svg><span data-i18n="cache.title">Result cache</span></span><span class="head-trailing"><span id="cache-badge" class="badge hidden"></span><svg class="chevron" viewBox="0 0 20 20" aria-hidden="true"><path d="M6.5 8l3.5 3.5L13.5 8"></path></svg></span>
         </div>
         <div id="cache-body" class="body hidden">
             <p class="hint" data-i18n="cache.hint">Recent results are stored locally.</p>
@@ -144,8 +168,8 @@
     </div>
 
     <div class="section collapsible">
-        <div id="preset-header" class="head">
-            <span data-i18n="presets.title">Prompt presets</span><span id="preset-count" class="badge hidden"></span>
+        <div id="preset-header" class="head" role="button" tabindex="0" aria-controls="preset-body">
+            <span class="head-label"><svg class="section-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 3.5h10v13l-5-3-5 3v-13z"></path></svg><span data-i18n="presets.title">Prompt presets</span></span><span class="head-trailing"><span id="preset-count" class="badge hidden"></span><svg class="chevron" viewBox="0 0 20 20" aria-hidden="true"><path d="M6.5 8l3.5 3.5L13.5 8"></path></svg></span>
         </div>
         <div id="preset-body" class="body hidden">
             <div id="preset-list"></div>
@@ -157,12 +181,12 @@
     </div>
 
     <div class="section collapsible">
-        <div id="history-header" class="head"><span data-i18n="history.title">History</span></div>
+        <div id="history-header" class="head" role="button" tabindex="0" aria-controls="history-body"><span class="head-label"><svg class="section-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4.8 6.2V3.5M4.8 3.5h2.7M4.8 3.5A7 7 0 1 1 3.3 11M10 6v4l2.7 1.6"></path></svg><span data-i18n="history.title">History</span></span><svg class="chevron" viewBox="0 0 20 20" aria-hidden="true"><path d="M6.5 8l3.5 3.5L13.5 8"></path></svg></div>
         <div id="history-body" class="body hidden"><div id="history-list"></div></div>
     </div>
 
     <div class="section collapsible">
-        <div id="report-header" class="head"><span data-i18n="report.title">Report a bug</span></div>
+        <div id="report-header" class="head" role="button" tabindex="0" aria-controls="report-body"><span class="head-label"><svg class="section-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M6.2 7.3A3.8 3.8 0 0 1 10 4a3.8 3.8 0 0 1 3.8 3.3v5.2a3.8 3.8 0 0 1-7.6 0V7.3zM3.5 9h2.7M13.8 9h2.7M4.5 5.5l2.1 1.2M15.5 5.5l-2.1 1.2M10 4V2.5"></path></svg><span data-i18n="report.title">Report a bug</span></span><svg class="chevron" viewBox="0 0 20 20" aria-hidden="true"><path d="M6.5 8l3.5 3.5L13.5 8"></path></svg></div>
         <div id="report-body" class="body hidden">
             <p class="hint" data-i18n="report.hint">Describe what happened. ExactFill will open a prefilled GitHub issue.</p>
             <textarea id="report-summary" rows="2" placeholder="Short summary"
@@ -174,6 +198,7 @@
             <sp-button id="report-submit" size="s" data-i18n="report.submit">Open GitHub issue</sp-button>
             <p id="report-status" class="status"></p>
         </div>
+    </div>
     </div>
 
     <div class="section public-footer">

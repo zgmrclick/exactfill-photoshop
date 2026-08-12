@@ -112,13 +112,19 @@ function readSettings() {
 
 function setStatus(text) {
     const el = $('status-text');
-    if (el) el.textContent = text || '';
+    if (el) {
+        el.textContent = text || '';
+        el.classList.toggle('has-content', Boolean(text));
+    }
 }
 
 function setBusy(on) {
     busy = on;
     const btn = $('generate-btn');
-    if (btn) btn.disabled = on;            // захист від подвійного кліку — у старому його не було
+    if (btn) {
+        btn.disabled = on;                 // захист від подвійного кліку — у старому його не було
+        btn.setAttribute('aria-busy', on ? 'true' : 'false');
+    }
     const regen = $('regen-btn');
     if (regen) regen.disabled = on || !lastRun;
     const cancel = $('cancel-btn');
@@ -171,10 +177,11 @@ function ensureNumericControl(id, lsKey, values, unit) {
     const field = document.createElement('div');
     field.className = 'field';
     const label = document.createElement('label');
-    label.className = 'lbl';
+    label.className = 'field-title';
     label.textContent = el.querySelector('sp-label')?.textContent || id;
     const seg = document.createElement('div');
-    seg.className = 'seg';
+    seg.className = 'seg numeric-seg';
+    seg.setAttribute('role', 'group');
 
     const holder = document.createElement('div');
     holder.id = id;                            // той самий id
@@ -183,14 +190,19 @@ function ensureNumericControl(id, lsKey, values, unit) {
 
     for (const v of values) {
         const btn = document.createElement('button');
-        btn.className = 'seg-btn' + (v === initial ? ' active' : '');
+        btn.type = 'button';
+        btn.className = 'seg-btn numeric-seg-btn' + (v === initial ? ' active' : '');
         btn.textContent = v + unit;
         btn.dataset.value = String(v);
+        btn.setAttribute('aria-pressed', v === initial ? 'true' : 'false');
         btn.addEventListener('click', () => {
             holder.value = String(v);
             localStorage.setItem(lsKey, String(v));
-            seg.querySelectorAll('.seg-btn').forEach(b =>
-                b.classList.toggle('active', b.dataset.value === String(v)));
+            seg.querySelectorAll('.seg-btn').forEach(b => {
+                const active = b.dataset.value === String(v);
+                b.classList.toggle('active', active);
+                b.setAttribute('aria-pressed', active ? 'true' : 'false');
+            });
             refreshPlanLine();
         });
         seg.appendChild(btn);
@@ -316,16 +328,22 @@ function initQuality() {
     const group = $('quality-toggle');
     if (!group) return;
     const saved = localStorage.getItem(LS.quality) || 'medium';
+    group.setAttribute('aria-label', mainI18n.t('field.quality'));
     group.innerHTML = '';
     for (const q of QUALITIES) {
         const btn = document.createElement('button');
+        btn.type = 'button';
         btn.className = 'seg-btn' + (q === saved ? ' active' : '');
         btn.textContent = mainI18n.t(`quality.${q}`);
         btn.dataset.value = q;
+        btn.setAttribute('aria-pressed', q === saved ? 'true' : 'false');
         btn.addEventListener('click', () => {
             localStorage.setItem(LS.quality, q);
-            group.querySelectorAll('.seg-btn').forEach(b =>
-                b.classList.toggle('active', b.dataset.value === q));
+            group.querySelectorAll('.seg-btn').forEach(b => {
+                const active = b.dataset.value === q;
+                b.classList.toggle('active', active);
+                b.setAttribute('aria-pressed', active ? 'true' : 'false');
+            });
             refreshPlanLine();
         });
         group.appendChild(btn);
@@ -346,23 +364,31 @@ function schedulePlanLine() {
     planTimer = setTimeout(refreshPlanLine, 250);
 }
 
+function setPlanCard(titleKey, body, ready) {
+    const card = $('plan-card');
+    const title = $('plan-title');
+    const line = $('plan-line');
+    if (!card || !title || !line) return;
+    title.textContent = mainI18n.t(titleKey);
+    line.textContent = body || '';
+    card.classList.toggle('dim', !ready);
+}
+
 async function refreshPlanLine() {
     const el = $('plan-line');
     if (!el) return;
     try {
         const doc = app.activeDocument;
-        if (!doc) { el.textContent = mainI18n.t('plan.noDocument'); el.className = 'plan dim'; return; }
+        if (!doc) { setPlanCard('plan.notReadyTitle', mainI18n.t('plan.noDocument'), false); return; }
 
         const sel = await readSelectionBounds(doc).catch(() => null);
         if (!sel || !sel.bounds) {
-            el.textContent = mainI18n.t('plan.selectArea');
-            el.className = 'plan dim';
+            setPlanCard('plan.selectTitle', mainI18n.t('plan.selectArea'), false);
             return;
         }
         const target = geometry.integerTarget(sel.bounds);
         if (target.w < 1 || target.h < 1) {
-            el.textContent = mainI18n.t('plan.emptySelection');
-            el.className = 'plan dim';
+            setPlanCard('plan.selectTitle', mainI18n.t('plan.emptySelection'), false);
             return;
         }
         const s = readSettings();
@@ -383,17 +409,16 @@ async function refreshPlanLine() {
         const losslessNote = s.lossless && ctx.w * ctx.h > capture.LOSSLESS_MAX_PX
             ? ` · ${mainI18n.t('plan.inputJpegLarge')}`
             : s.lossless ? ` · ${mainI18n.t('plan.inputPng')}` : ` · ${mainI18n.t('plan.inputJpeg')}`;
-        el.textContent = mainI18n.t('plan.request', {
+        setPlanCard('plan.readyTitle', mainI18n.t('plan.request', {
             what,
             input: losslessNote,
             width: target.w,
             height: target.h,
             context: s.padPercent ? mainI18n.t('plan.context', { width: ctx.w, height: ctx.h }) : '',
             refs: references.length ? mainI18n.t('plan.refs', { count: references.length }) : '',
-        });
-        el.className = 'plan';
+        }), true);
     } catch (e) {
-        el.textContent = '';
+        setPlanCard('plan.notReadyTitle', '', false);
         console.warn('[ui] план не порахувався:', e.message);
     }
 }
@@ -1034,13 +1059,24 @@ document.addEventListener('DOMContentLoaded', () => {
         renderPresets();
     });
 
-    // Секції, що згортаються
+    // Секції, що згортаються. Підтримуємо мишу й клавіатуру та синхронізуємо
+    // aria-expanded — у вузькій панелі це ще й надійне джерело стану шеврона.
     for (const [head, body] of [['opts-header', 'opts-body'], ['usage-header', 'usage-body'],
                                 ['ref-header', 'ref-body'], ['cache-header', 'cache-body'],
                                 ['preset-header', 'preset-body'], ['history-header', 'history-body'],
                                 ['report-header', 'report-body']]) {
         const h = $(head), b = $(body);
-        if (h && b) h.addEventListener('click', () => b.classList.toggle('hidden'));
+        if (!h || !b) continue;
+        const sync = () => h.setAttribute('aria-expanded', b.classList.contains('hidden') ? 'false' : 'true');
+        const toggle = () => { b.classList.toggle('hidden'); sync(); };
+        sync();
+        h.addEventListener('click', toggle);
+        h.addEventListener('keydown', e => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                toggle();
+            }
+        });
     }
 });
 

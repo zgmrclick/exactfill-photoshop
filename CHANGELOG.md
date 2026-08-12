@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.3.0 — 2026-08-12
+
+- Added a dedicated vertical scroll region that keeps the ExactFill header visible.
+- Redesigned the primary workflow for clearer prompt, provider, model, quality and action hierarchy.
+- Improved narrow-panel behavior down to the 230 px manifest minimum without horizontal overflow.
+- Added keyboard-accessible accordions, explicit focus states and accessible busy/selection state metadata.
+- Increased the preferred docked and floating panel sizes while preserving the existing minimum size.
+- Replaced fragile grid-dependent layout and oversized Spectrum actions with deterministic UXP-safe controls.
+- Added a readiness card, compact bordered accordion stack, consistent inline icons and collapsed-by-default advanced settings.
+- Added an optimized real-world demo video, release screenshots and an interactive before/after page.
+
 ## 1.2.1 — 2026-08-11
 
 - Added bilingual firewall and proxy guidance for Windows and macOS.

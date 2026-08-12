@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="See ExactFill make an exact, non-destructive AI edit inside Photoshop.">
+    <title>ExactFill — interactive Photoshop demo</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --bg: #17181b;
+            --surface: #222429;
+            --surface-2: #2a2d33;
+            --text: #f4f5f7;
+            --muted: #a8adb7;
+            --line: rgba(255, 255, 255, .14);
+            --accent: #3d92f5;
+            --accent-2: #8468f3;
+            --radius: 14px;
+        }
+
+        * { box-sizing: border-box; }
+        html { scroll-behavior: smooth; }
+        body {
+            margin: 0;
+            color: var(--text);
+            background: var(--bg);
+            font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            line-height: 1.5;
+        }
+        a { color: inherit; }
+        .shell { width: min(1120px, calc(100% - 32px)); margin: 0 auto; }
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 20px;
+            min-height: 72px;
+            border-bottom: 1px solid var(--line);
+        }
+        .brand { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; font-weight: 720; }
+        .brand svg { width: 28px; height: 28px; }
+        nav { display: flex; align-items: center; gap: 18px; color: var(--muted); font-size: 14px; }
+        nav a { text-decoration: none; }
+        nav a:hover { color: var(--text); }
+        .download {
+            padding: 8px 13px;
+            color: #fff;
+            background: var(--accent);
+            border-radius: 7px;
+        }
+        main { padding: 72px 0 80px; }
+        .intro { max-width: 760px; margin-bottom: 34px; }
+        h1 { max-width: 720px; margin: 0; overflow-wrap: anywhere; font-size: clamp(38px, 7vw, 72px); line-height: .98; letter-spacing: -.045em; }
+        .intro p { max-width: 660px; margin: 24px 0 0; overflow-wrap: anywhere; color: var(--muted); font-size: clamp(17px, 2.3vw, 21px); }
+        .compare {
+            position: relative;
+            overflow: hidden;
+            aspect-ratio: 1600 / 858;
+            background: var(--surface);
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            box-shadow: 0 30px 80px rgba(0, 0, 0, .38);
+            touch-action: pan-y;
+        }
+        .compare img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; user-select: none; pointer-events: none; }
+        .after { clip-path: inset(0 50% 0 0); }
+        .divider { position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; background: #fff; transform: translateX(-1px); pointer-events: none; }
+        .handle {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            display: grid;
+            place-items: center;
+            width: 46px;
+            height: 46px;
+            color: #111;
+            background: #fff;
+            border-radius: 50%;
+            box-shadow: 0 8px 26px rgba(0, 0, 0, .35);
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+        .handle svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+        .label { position: absolute; top: 16px; padding: 6px 9px; background: rgba(17, 18, 21, .8); border: 1px solid rgba(255, 255, 255, .18); border-radius: 6px; font-size: 12px; font-weight: 700; backdrop-filter: blur(10px); }
+        .label.before { left: 16px; }
+        .label.after-label { right: 16px; }
+        .compare input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: ew-resize; }
+        .compare:focus-within { outline: 2px solid var(--accent); outline-offset: 4px; }
+        .hint { display: flex; justify-content: space-between; gap: 16px; margin: 12px 2px 0; color: var(--muted); font-size: 13px; }
+        .demo-grid { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(260px, .55fr); gap: 24px; margin-top: 72px; align-items: start; }
+        .video-frame { overflow: hidden; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+        video { display: block; width: 100%; height: auto; }
+        .copy { padding: 8px 0; }
+        h2 { margin: 0 0 14px; font-size: clamp(27px, 4vw, 40px); line-height: 1.08; letter-spacing: -.025em; }
+        .copy p { margin: 0 0 24px; color: var(--muted); }
+        .facts { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
+        .facts li { display: flex; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+        .facts span { color: var(--muted); }
+        footer { padding: 28px 0 40px; color: var(--muted); border-top: 1px solid var(--line); font-size: 13px; }
+        footer .shell { display: flex; justify-content: space-between; gap: 20px; }
+        @media (max-width: 760px) {
+            nav > a:not(.download) { display: none; }
+            main { padding-top: 48px; }
+            .demo-grid { grid-template-columns: 1fr; margin-top: 48px; }
+            .label { top: 9px; }
+            .label.before { left: 9px; }
+            .label.after-label { right: 9px; }
+            .handle { width: 38px; height: 38px; }
+            .hint { flex-direction: column; gap: 2px; }
+            .hint span:last-child { align-self: flex-end; text-align: right; }
+            footer .shell { flex-direction: column; }
+        }
+        @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+    </style>
+</head>
+<body>
+    <header class="shell">
+        <a class="brand" href="https://github.com/zgmrclick/exactfill-photoshop">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="2.5" width="13" height="13" rx="3" fill="none" stroke="#46a7ff" stroke-width="2.5"></rect><rect x="8.5" y="8.5" width="13" height="13" rx="3" fill="none" stroke="#8c5cff" stroke-width="2.5"></rect><path d="M9.5 14.5c2.7-.1 4.9-2.3 5-5" fill="none" stroke="#f1f1f1" stroke-width="2" stroke-linecap="round"></path></svg>
+            ExactFill
+        </a>
+        <nav aria-label="Primary navigation">
+            <a href="#video">Video</a>
+            <a href="https://github.com/zgmrclick/exactfill-photoshop">Source</a>
+            <a class="download" href="https://github.com/zgmrclick/exactfill-photoshop/releases/latest">Download</a>
+        </nav>
+    </header>
+
+    <main class="shell">
+        <section class="intro">
+            <h1>Exact AI edits, right inside Photoshop.</h1>
+            <p>Select an area, describe the change, and get a precisely placed Smart Object with a native layer mask.</p>
+        </section>
+
+        <section aria-label="Before and after comparison">
+            <div class="compare" id="comparison">
+                <img src="assets/demo-before.jpg" alt="Original Photoshop selection containing a horse in the water">
+                <img class="after" src="assets/demo-after.jpg" alt="The same selection after ExactFill added a saddle and rider">
+                <span class="label before">Before</span>
+                <span class="label after-label">After</span>
+                <span class="divider" aria-hidden="true"></span>
+                <span class="handle" aria-hidden="true">
+                    <svg viewBox="0 0 24 24"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5M3 12h18"></path></svg>
+                </span>
+                <input id="compare-range" type="range" min="0" max="100" value="50" aria-label="Reveal before or after image">
+            </div>
+            <div class="hint"><span>Drag to compare</span><span>One selection · one native Photoshop layer</span></div>
+        </section>
+
+        <section class="demo-grid" id="video">
+            <div class="video-frame">
+                <video controls playsinline preload="metadata" poster="assets/demo-after.jpg">
+                    <source src="assets/exactfill-demo.mp4" type="video/mp4">
+                    Your browser does not support embedded video.
+                </video>
+            </div>
+            <div class="copy">
+                <h2>The complete workflow in 22 seconds.</h2>
+                <p>This is a real Photoshop recording. ExactFill sends the selected area directly to OpenAI, then places the result exactly back into the document.</p>
+                <ul class="facts">
+                    <li><span>Output</span><strong>Smart Object</strong></li>
+                    <li><span>Placement residual</span><strong>0 px</strong></li>
+                    <li><span>Photoshop document</span><strong>Unconverted</strong></li>
+                    <li><span>ExactFill server</span><strong>None</strong></li>
+                </ul>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="shell"><span>ExactFill is free and open source.</span><span>MIT · Windows and macOS · Photoshop 25.0+</span></div>
+    </footer>
+
+    <script>
+        const range = document.getElementById('compare-range');
+        const after = document.querySelector('.after');
+        const divider = document.querySelector('.divider');
+        const handle = document.querySelector('.handle');
+
+        function updateComparison() {
+            const value = Number(range.value);
+            after.style.clipPath = `inset(0 ${100 - value}% 0 0)`;
+            divider.style.left = `${value}%`;
+            handle.style.left = `${value}%`;
+        }
+
+        range.addEventListener('input', updateComparison);
+        updateComparison();
+    </script>
+</body>
+</html>
