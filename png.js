@@ -297,11 +297,14 @@ function buildRectMaskPng(width, height, rect, feather = 0) {
     const f = Math.max(0, Math.min(feather, (R - L) / 2 - 1, (B - T) / 2 - 1));
     const half = f / 2;
 
-    const px = new Uint8Array(width * height * 2);
+    // RGBA, а не «сірий + альфа»: приклад у документації OpenAI саме такий, і
+    // формат маски не варто робити екзотичнішим за потрібне — альфа тут єдине,
+    // що читає провайдер, але тип 4 уже одного разу коштував нам розслідування
+    const px = new Uint8Array(width * height * 4);
     for (let y = 0; y < height; y++) {
         const dy = Math.min(y - T, B - 1 - y);
-        let o = y * width * 2;
-        for (let x = 0; x < width; x++, o += 2) {
+        let o = y * width * 4;
+        for (let x = 0; x < width; x++, o += 4) {
             const dx = Math.min(x - L, R - 1 - x);
             const d = Math.min(dx, dy);              // >0 усередині, <0 назовні
             let a;
@@ -313,11 +316,11 @@ function buildRectMaskPng(width, height, rect, feather = 0) {
                 t = t * t * (3 - 2 * t);             // smoothstep — без злому на краях смуги
                 a = Math.round(255 * (1 - t));
             }
-            px[o]     = a;    // сірий: косметика, провайдер його не читає
-            px[o + 1] = a;    // alpha: 0 = змінити, 255 = зберегти
+            px[o] = px[o + 1] = px[o + 2] = a;   // RGB: косметика, провайдер його не читає
+            px[o + 3] = a;                       // alpha: 0 = змінити, 255 = зберегти
         }
     }
-    return encodePng(px, width, height, 2);
+    return encodePng(px, width, height, 4);
 }
 
 module.exports = {

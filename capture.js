@@ -230,9 +230,13 @@ async function captureViaDuplicate(bounds, useLayerOnly, lossless) {
  * @param {{left,top,right,bottom}} bounds — цілі межі (geometry.integerTarget)
  * @param {boolean} useLayerOnly — лише активний шар замість зведеного
  * @param {boolean} wantLossless — просити PNG замість JPEG (авто-деградація вище порогу)
+ * @param {boolean} requirePng — PNG обов'язковий: у запит іде маска, а OpenAI вимагає
+ *        однаковий формат входу й маски. Тоді поріг НЕ деградує формат, а лише
+ *        відправляє нас на шлях через дублікат, де PNG пише сам Photoshop.
  * @returns {Promise<{blob:Blob, docMode:string, bpc:number, viaDuplicate:boolean, lossless:boolean}>}
  */
-async function captureRegion(bounds, useLayerOnly = false, wantLossless = true) {
+async function captureRegion(bounds, useLayerOnly = false, wantLossless = true,
+                             requirePng = false) {
     const doc = app.activeDocument;
     if (!doc) throw new Error(captureI18n.t('capture.noDocument'));
 
@@ -244,14 +248,25 @@ async function captureRegion(bounds, useLayerOnly = false, wantLossless = true) 
         throw new Error(captureI18n.t('capture.emptyArea', { width: w, height: h }));
     }
 
-    let lossless = wantLossless;
+    let lossless = wantLossless || requirePng;
+    // Поріг стосується лише НАШОГО JS-кодера. Коли PNG обов'язковий, деградувати
+    // формат не можна: JPEG-вхід із PNG-маскою сервер приймає й тихо ігнорує
+    // маску — модель перемальовує весь кадр. Тому йдемо через дублікат, де PNG
+    // пише Photoshop і поріг ні до чого.
+    let viaDuplicateOnly = false;
     if (lossless && w * h > LOSSLESS_MAX_PX) {
-        lossless = false;
-        console.log(`[capture] ${w}×${h} = ${(w * h / 1e6).toFixed(1)} МП — вище порогу ` +
-                    `${LOSSLESS_MAX_PX / 1e6} МП, беру JPEG замість PNG`);
+        if (requirePng) {
+            viaDuplicateOnly = true;
+            console.log(`[capture] ${w}×${h} — вище порогу, але маска вимагає PNG: ` +
+                        'пишу PNG через дублікат документа');
+        } else {
+            lossless = false;
+            console.log(`[capture] ${w}×${h} = ${(w * h / 1e6).toFixed(1)} МП — вище порогу ` +
+                        `${LOSSLESS_MAX_PX / 1e6} МП, беру JPEG замість PNG`);
+        }
     }
 
-    if (isSafeMode(docMode)) {
+    if (!viaDuplicateOnly && isSafeMode(docMode)) {
         try {
             const blob = await captureDirect(bounds, useLayerOnly, lossless);
             return { blob, docMode, bpc, viaDuplicate: false, lossless };

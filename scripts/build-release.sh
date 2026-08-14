@@ -23,7 +23,8 @@ ROOT_FILES=(
     public-ui.js style.css usage.js
 )
 PROVIDER_FILES=(
-    providers/google.js providers/http.js providers/index.js providers/openai.js
+    providers/curl-transport.js providers/google.js providers/http.js
+    providers/index.js providers/openai.js
 )
 PANEL_ICON_FILES=(
     panel-dark@1x.png panel-dark@2x.png panel-light@1x.png panel-light@2x.png

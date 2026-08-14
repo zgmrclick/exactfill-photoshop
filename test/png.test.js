@@ -43,7 +43,7 @@ for(const [w,h] of [[1024,1024],[2048,1536],[3840,2160],[816,816]]){
   }
   let inflOK=false, rawLen=0;
   try{ const r=zlib.inflateSync(Buffer.from(idat)); inflOK=true; rawLen=r.length; }catch(e){}
-  const expectRaw = h*(w*2+1);
+  const expectRaw = h*(w*4+1);   // RGBA: вхід і маска мусять бути однакового формату
   console.log(`  ${w}×${h}: ${(png.length/1024).toFixed(1)} КБ  sig=${sigOK} crc=${crcOK} chunks=[${chunks}] inflate=${inflOK} raw=${rawLen}/${expectRaw} ${rawLen===expectRaw?'✓':'✗'}`);
   if(!sigOK||!crcOK||!inflOK||rawLen!==expectRaw) fail++;
   if(png.length>4*1024*1024){ console.log('    ✗ ПЕРЕВИЩЕНО ліміт 4 МБ'); fail++; }
@@ -86,7 +86,7 @@ catch(e){ console.log(`  не-PNG → ✓ "${e.message}"`); }
 console.log('\n=== buildRectMaskPng: мʼякий край ===');
 {
   const W=1024,H=1024,R={left:200,top:150,right:800,bottom:650};
-  const stride=W*2+1;
+  const stride=W*4+1;
   for(const f of [0,4,8,16,32,64,128,256]){
     const png=P.buildRectMaskPng(W,H,R,f);
     let off=8,idat=null;
@@ -97,7 +97,7 @@ console.log('\n=== buildRectMaskPng: мʼякий край ===');
       off+=12+len;
     }
     const raw=zlib.inflateSync(Buffer.from(idat));
-    const alpha=(x,y)=>raw[y*stride+1+x*2+1];
+    const alpha=(x,y)=>raw[y*stride+1+x*4+3];
     const inside=alpha(500,400), edge=alpha(R.left,400), outside=alpha(100,400);
     // Для дуже широкого feather точка x=100 сама вже лежить у градієнті;
     // тоді перевіряємо, що вона світліша за межу, а не вимагаємо alpha=255.

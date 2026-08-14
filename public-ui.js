@@ -31,6 +31,8 @@ function safeDiagnostics() {
         `- Provider: ${storedSetting('ai_provider', 'unknown')}`,
         `- Model: ${storedSetting('ai_model', 'unknown')}`,
         `- Quality: ${storedSetting('ai_quality', 'medium')}`,
+        // маршрут мережі — перше, що потрібно знати в звіті про «немає з'єднання»
+        `- Network route: ${storedSetting('ai_transport', 'auto')}`,
         `- Lossless input: ${storedSetting('ai_lossless', 'default')}`,
         `- Live preview: ${storedSetting('ai_live_preview', 'default')}`,
     ].join('\n');

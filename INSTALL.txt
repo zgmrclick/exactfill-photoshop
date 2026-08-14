@@ -1,4 +1,4 @@
-EXACTFILL 1.3.2 — INSTALLATION
+EXACTFILL 1.4.0 — INSTALLATION
 ================================
 
 ExactFill is the same plugin on Windows and macOS. Extract this ZIP completely,
@@ -33,6 +33,22 @@ takes priority over a conflicting Allow rule. Such a broad block must be disable
 or replaced by a policy/firewall that supports the required domain exceptions.
 Do not hard-code the providers' current IP addresses: they can change.
 
+NETWORK ROUTE (when the firewall blocks Photoshop itself)
+---------------------------------------------------------
+Advanced -> "Network route" offers three options:
+
+   Auto           - try Photoshop first; if it cannot reach the provider within
+                    a few seconds, hand the request to the system curl tool
+   Photoshop      - always request directly from Photoshop (previous behaviour)
+   System curl    - always request through the system curl tool
+
+A rule that blocks Photoshop does not apply to curl, because curl is a separate
+program. curl ships with macOS and with Windows 10 and newer, so nothing has to
+be installed. Your firewall may ask once to allow curl; the first request can
+wait on that prompt. Verified on macOS with Photoshop blocked; the Windows route
+is still being tested, and "Auto" falls back to the direct request whenever the
+curl route is unavailable.
+
 macOS
 -----
 1. Close Photoshop.
@@ -61,7 +77,7 @@ The final folder must contain manifest.json directly inside it.
 
 =======================================================================
 
-EXACTFILL 1.3.2 — ВСТАНОВЛЕННЯ
+EXACTFILL 1.4.0 — ВСТАНОВЛЕННЯ
 ================================
 
 ExactFill однаковий для Windows і macOS. Повністю розпакуйте ZIP, а потім
@@ -95,6 +111,21 @@ TCP-порт 443 до домену потрібного провайдера:
 пріоритет над суперечливим правилом Allow. Таке загальне блокування треба
 вимкнути або замінити політикою/фаєрволом, що підтримує потрібні винятки за
 доменами. Не вписуйте поточні IP-адреси провайдерів: вони можуть змінюватися.
+
+МАРШРУТ МЕРЕЖІ (коли фаєрвол блокує сам Photoshop)
+--------------------------------------------------
+У розділі налаштувань "Маршрут мережі" є три варіанти:
+
+   Авто            - спершу пробує Photoshop; якщо той не дістає провайдера за
+                     кілька секунд, запит виконує системна утиліта curl
+   Photoshop       - завжди прямий запит із Photoshop (попередня поведінка)
+   Системний curl  - завжди через системну утиліту curl
+
+Правило, що блокує Photoshop, не діє на curl: це окрема програма. curl входить
+до складу macOS і Windows 10 та новіших, тому нічого встановлювати не потрібно.
+Фаєрвол може один раз попросити дозвіл для curl — перший запит може на нього
+чекати. Перевірено на macOS із заблокованим Photoshop; маршрут у Windows ще
+тестується, і "Авто" повертається до прямого запиту, якщо curl недоступний.
 
 macOS
 -----

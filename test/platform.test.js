@@ -12,8 +12,15 @@ const runtimeFiles = [
     'app-info.js', 'auth.js', 'cache.js', 'capture.js', 'geometry.js', 'history.js',
     'i18n.js', 'layer-tree.js', 'main.js', 'place.js', 'png.js', 'presets.js',
     'public-ui.js', 'usage.js',
-    'providers/google.js', 'providers/http.js', 'providers/index.js', 'providers/openai.js',
+    'providers/curl-transport.js', 'providers/google.js', 'providers/http.js',
+    'providers/index.js', 'providers/openai.js',
 ];
+
+// Єдиний файл, якому нативні шляхи потрібні по суті задачі: щоб зібрати команду
+// для системної оболонки. Файли створює сам UXP у своїй тимчасовій папці, тому
+// читання й прибирання йдуть через ті самі Entry. Вставка в документ як раніше —
+// через session token, і цей виняток на неї не поширюється.
+const NATIVE_PATH_ALLOWED = new Set(['providers/curl-transport.js']);
 
 test('public metadata and manifest stay aligned', () => {
     assert.equal(manifest.version, pkg.version);
@@ -55,8 +62,46 @@ test('runtime contains no absolute platform-specific paths', () => {
         const source = fs.readFileSync(path.join(ROOT, file), 'utf8');
         assert.doesNotMatch(source, /\/Applications\//, `${file}: macOS absolute path`);
         assert.doesNotMatch(source, /[A-Za-z]:\\\\(?:Program Files|Users|Windows)\\\\/, `${file}: Windows absolute path`);
-        assert.doesNotMatch(source, /\.nativePath\b/, `${file}: nativePath bypasses UXP tokens`);
+        if (!NATIVE_PATH_ALLOWED.has(file)) {
+            assert.doesNotMatch(source, /\.nativePath\b/, `${file}: nativePath bypasses UXP tokens`);
+        }
     }
+});
+
+test('the curl transport keeps its dangerous parts contained', () => {
+    const source = fs.readFileSync(path.join(ROOT, 'providers/curl-transport.js'), 'utf8');
+    // ключ живе лише у файлі --config: аргументи процесу видно в ps(1)
+    assert.match(source, /data-binary = /);
+    assert.doesNotMatch(source, /Authorization[^\n]*\+/, 'no key concatenated into a command');
+    // шлях до curl мусить обчислюватись у згенерованому скрипті, не бути вбитим тут
+    assert.match(source, /getenv\("SystemRoot"\)/);
+    assert.doesNotMatch(source, /\/usr\/local\/bin\/curl/);
+    // тільки транспорт має право говорити з ExtendScript-містком
+    for (const file of runtimeFiles.filter(f => f !== 'providers/curl-transport.js')) {
+        assert.doesNotMatch(fs.readFileSync(path.join(ROOT, file), 'utf8'),
+            /AdobeScriptAutomation Scripts/, `${file}: bridge use must stay in one module`);
+    }
+    // place.js досі вставляє через токен, а не через шлях
+    assert.doesNotMatch(fs.readFileSync(path.join(ROOT, 'place.js'), 'utf8'), /\.nativePath\b/);
+});
+
+test('a request mask is never paired with a non-PNG input', () => {
+    // OpenAI: «the source image and the mask must share the same format and
+    // dimensions». Сервер розбіжність не відхиляє — він тихо ігнорує маску, і
+    // модель перемальовує весь кадр. Симптом: «модель не бачить виділення».
+    const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
+    const capture = fs.readFileSync(path.join(ROOT, 'capture.js'), 'utf8');
+    const png = fs.readFileSync(path.join(ROOT, 'png.js'), 'utf8');
+
+    // рішення про маску мусить ухвалюватись ДО захоплення й керувати форматом
+    assert.match(main, /const wantMask = /);
+    assert.match(main, /captureRegion\(ctx, s\.layerOnly, s\.lossless, wantMask\)/);
+    // останній рубіж: невідповідний формат знімає маску, а не їде мовчки далі
+    assert.match(main, /cap\.blob\.type !== 'image\/png'[\s\S]{0,240}maskBlob = null/);
+    // поріг швидкості не має права деградувати формат, коли PNG обов'язковий
+    assert.match(capture, /requirePng[\s\S]{0,400}viaDuplicateOnly = true/);
+    // маска — RGBA (тип 6), як у прикладі документації
+    assert.match(png, /encodePng\(px, width, height, 4\)/);
 });
 
 test('local requires resolve with exact filename case', () => {

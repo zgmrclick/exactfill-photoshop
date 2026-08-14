@@ -214,6 +214,11 @@ async function generate({ apiKey, model, prompt, imageBlob, maskBlob, references
 
     if (onProgress) onProgress(openAiI18n.t('provider.generating'));
     const useEdit = imageBlob && !ignorePixels;
+    // «модель не бачить виділену область» діагностується лише цим рядком:
+    // без нього неможливо відрізнити редагування від генерації з нуля
+    console.log(`[openai] ${useEdit ? 'images/edits' : 'images/generations (БЕЗ пікселів області)'}` +
+                `${imageBlob ? `, вхід ${(imageBlob.size / 1024).toFixed(0)} КБ` : ', входу немає'}` +
+                `${useEdit && maskBlob ? ', маска є' : ''}${ignorePixels ? ', «ігнорувати пікселі» увімкнено' : ''}`);
     const res = await withRetry(() => (useEdit
         ? editImage({ apiKey, model, prompt, imageBlob, maskBlob, references,
                       plan, background, signal, onPartial })

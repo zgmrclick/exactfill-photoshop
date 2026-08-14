@@ -17,6 +17,7 @@ test('every translation is non-empty and resolves placeholders', () => {
                 width: 10, height: 20, what: 'edit', input: '', context: '', refs: '',
                 dx: 0, dy: 0, dw: 0, dh: 0, number: 1, seconds: 60,
                 host: 'api.example.com', refusal: '', reason: 'reason', detail: '', text: 'text',
+                code: 28,
             });
             assert.doesNotMatch(rendered, /\{\w+\}/, `${locale}:${key} has an unresolved placeholder`);
         }

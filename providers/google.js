@@ -190,6 +190,10 @@ async function generate({ apiKey, model, prompt, imageBlob, references, plan,
     if (!prompt || !prompt.trim()) throw new Error(googleI18n.t('provider.emptyPrompt'));
 
     if (onProgress) onProgress(googleI18n.t('provider.generating'));
+    // те саме, що в openai.js: інакше «щось геть не те» не діагностується здалеку
+    console.log(`[google] ${imageBlob && !ignorePixels
+        ? `область іде в запит, вхід ${(imageBlob.size / 1024).toFixed(0)} КБ`
+        : 'БЕЗ пікселів області'}${ignorePixels ? ', «ігнорувати пікселі» увімкнено' : ''}`);
     const res = await withRetry(() => callWithFallback({
         apiKey, model, prompt,
         imageBlob: ignorePixels ? null : imageBlob,

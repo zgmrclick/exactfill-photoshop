@@ -2,11 +2,14 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const { buildReportUrl, safeDiagnostics } = require('../public-ui.js');
+const appInfo = require('../app-info.js');
 
 test('safe diagnostics contain useful metadata but no private content', () => {
     const diagnostics = safeDiagnostics();
-    assert.match(diagnostics, /ExactFill: 1\.3\.2/);
+    // версію беремо з app-info, інакше кожен bump ламає тест на порожньому місці
+    assert.match(diagnostics, new RegExp(`ExactFill: ${appInfo.version.replace(/\./g, '\\.')}`));
     assert.match(diagnostics, /Provider:/);
+    assert.match(diagnostics, /Network route:/, 'a "no connection" report is useless without the route');
     assert.doesNotMatch(diagnostics, /api.?key|prompt|document name|file path/i);
 });
 

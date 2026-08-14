@@ -12,6 +12,45 @@
  * ========================================================================== */
 
 const httpI18n = require('../i18n.js');
+const transport = require('./curl-transport.js');
+
+/**
+ * Єдина точка виходу в мережу.
+ *
+ * ⚠️ ЧОМУ НЕ ПРОСТО fetch: UXP-дозвіл `network.domains` не обходить системний
+ * фаєрвол — запит іде з процесу Photoshop, і правило «Block Photoshop» його
+ * ріже (виміряно: Socket із процесу PS падає, дочірній curl тими ж секундами
+ * отримує 401/403). Тому в режимі 'auto' перша мережева відмова перемикає
+ * подальші запити на curl-транспорт, а 'curl'/'direct' задають шлях жорстко.
+ */
+async function netFetch(url, init, streaming) {
+    const viaCurl = () => (streaming ? transport.fetchLikeStream(url, init)
+                                     : transport.fetchLike(url, init));
+    // ⚠️ Перший запит сесії в 'auto' вирішуємо preflight'ом, а НЕ таймаутом самого
+    // запиту: заблокований потік висить, і з timeoutMs 300 с користувач дивився б
+    // на «Generating…» п'ять хвилин, перш ніж транспорт узагалі спробував би curl.
+    if (transport.getMode() === 'auto' && !transport.isRouteDecided()) {
+        try { await transport.decideRoute(new URL(url).origin); } catch (e) {}
+    }
+    if (transport.active()) return viaCurl();
+    try {
+        return await fetch(url, init);
+    } catch (e) {
+        const aborted = e && (e.name === 'AbortError' || String(e.message).includes('abort'));
+        if (aborted || transport.getMode() !== 'auto') throw e;
+        transport.noteDirectFailure();
+        const cap = await transport.probe();
+        if (!cap.ok) {
+            // маршруту немає — не лишаємо 'auto' у стані «перемкнено на curl»,
+            // інакше кожен наступний запит ішов би в неробочий транспорт
+            transport.resetDirectFailure();
+            console.log(`[http] curl-транспорт недоступний: ${cap.reason}`);
+            throw e;
+        }
+        console.log('[http] прямий fetch не дійшов — переходжу на curl-транспорт');
+        return viaCurl();
+    }
+}
 
 /** UTF-8 без TextEncoder — в UXP його немає. */
 function strToBytes(str) {
@@ -130,7 +169,7 @@ async function request(url, { method = 'GET', headers = {}, body, timeoutMs = 30
     try {
         let res;
         try {
-            res = await fetch(url, { method, headers, body, signal: link.signal });
+            res = await netFetch(url, { method, headers, body, signal: link.signal, timeoutMs }, false);
         } catch (e) {
             if (e && (e.name === 'AbortError' || String(e.message).includes('abort'))) {
                 if (link.wasCancelled()) throw new Cancelled();
@@ -195,7 +234,7 @@ async function requestStream(url, { method = 'POST', headers = {}, body, timeout
     try {
         let res;
         try {
-            res = await fetch(url, { method, headers, body, signal: link.signal });
+            res = await netFetch(url, { method, headers, body, signal: link.signal, timeoutMs }, true);
         } catch (e) {
             if (e && (e.name === 'AbortError' || String(e.message).includes('abort'))) {
                 if (link.wasCancelled()) throw new Cancelled();
@@ -315,4 +354,5 @@ module.exports = {
     strToBytes, blobToBase64, buildMultipart,
     request, requestStream, withRetry, HttpError, Cancelled, RETRYABLE, sleep,
     sleepWithSignal, parseRetryAfter, parseSse,
+    transport,
 };

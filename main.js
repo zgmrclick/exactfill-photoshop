@@ -30,11 +30,13 @@ const LS = {
     prompt: 'ai_prompt', layerOnly: 'ai_layer_only', pad: 'ai_context_pad',
     feather: 'ai_edge_feather', lossless: 'ai_lossless', transparent: 'ai_transparent',
     ignorePixels: 'ai_ignore_pixels', preview: 'ai_live_preview',
-    usage: 'ai_usage_ledger_v1',
+    usage: 'ai_usage_ledger_v1', transport: 'ai_transport',
 };
 
 const $ = id => document.getElementById(id);
 const QUALITIES = ['low', 'medium', 'high', 'auto'];
+const TRANSPORTS = ['auto', 'direct', 'curl'];
+const httpTransport = require('./providers/http.js').transport;
 
 let busy = false;
 let abortCtrl = null;
@@ -292,6 +294,9 @@ async function refreshModels() {
         setStatus(mainI18n.t('status.noModels', { provider: p.label }));
         return;
     }
+    // без цього рядка неможливо відрізнити «мережа не дала переліку» від
+    // «перелік прийшов, але pickerʼа не перемалювало»
+    console.log(`[ui] моделі: ${p.id} → ${list.length} (${list.slice(0, 3).map(m => m.id).join(', ')})`);
 
     // Поки мережевий перелік завантажувався, користувач міг уже вибрати іншого
     // провайдера. Старий результат не має права перезаписати новий picker.
@@ -348,6 +353,54 @@ function initQuality() {
         });
         group.appendChild(btn);
     }
+}
+
+/**
+ * Вибір мережевого маршруту.
+ *
+ * ⚠️ ЩО ЦЕ ВЗАГАЛІ ЛІКУЄ: дозвіл `network.domains` у manifest не має влади над
+ * системним фаєрволом — запит іде з процесу Photoshop, і правило «блокувати
+ * Photoshop» його ріже. Дочірній `curl` — окремий бінарник, тому під те правило
+ * не потрапляє. «Авто» не платить за це нічим, поки прямий шлях працює: воно
+ * перемикається лише після реальної мережевої відмови.
+ */
+function initTransport() {
+    const group = $('transport-toggle');
+    if (!group) return;
+    const saved = TRANSPORTS.includes(localStorage.getItem(LS.transport))
+        ? localStorage.getItem(LS.transport) : 'auto';
+    httpTransport.setMode(saved);
+    group.setAttribute('aria-label', mainI18n.t('field.transport'));
+    group.innerHTML = '';
+    for (const value of TRANSPORTS) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'seg-btn' + (value === saved ? ' active' : '');
+        btn.textContent = mainI18n.t(`transport.${value}`);
+        btn.dataset.value = value;
+        btn.setAttribute('aria-pressed', value === saved ? 'true' : 'false');
+        btn.addEventListener('click', () => {
+            localStorage.setItem(LS.transport, value);
+            httpTransport.setMode(value);
+            // ручний вибір скидає пам'ять про відмову: інакше 'auto' лишалося б
+            // назавжди в curl після однієї випадкової помилки мережі
+            httpTransport.resetDirectFailure();
+            group.querySelectorAll('.seg-btn').forEach(b => {
+                const active = b.dataset.value === value;
+                b.classList.toggle('active', active);
+                b.setAttribute('aria-pressed', active ? 'true' : 'false');
+            });
+            refreshTransportBadge();
+            if (value !== 'direct') setStatus(mainI18n.t('transport.firstApproval'));
+        });
+        group.appendChild(btn);
+    }
+    refreshTransportBadge();
+}
+
+/** Бейдж показує не вибір користувача, а фактичний маршрут просто зараз. */
+function refreshTransportBadge() {
+    setBadge('net-badge', httpTransport.active() ? mainI18n.t('transport.curl') : '');
 }
 
 /* ── Рядок «що саме буде запрошено» ────────────────────────────────────────── */
@@ -812,10 +865,15 @@ async function onGenerate(reuse) {
         console.log('[main] план запиту:', JSON.stringify(plan), 'ctx', ctx.w + '×' + ctx.h);
 
         /* 3. Захоплення пікселів — документ користувача не змінюється */
+        /* Рішення про маску ухвалюємо ДО захоплення: OpenAI вимагає, щоб вхід і
+           маска були одного формату, тому наявність маски визначає формат входу. */
+        const wantMask = provider.supportsMask && s.padPercent > 0 && !s.ignorePixels;
+
         let cap = { blob: null, lossless: false };
         if (!s.ignorePixels) {
             setStatus(mainI18n.t('status.capturing'));
-            cap = await core.executeAsModal(() => capture.captureRegion(ctx, s.layerOnly, s.lossless),
+            cap = await core.executeAsModal(
+                () => capture.captureRegion(ctx, s.layerOnly, s.lossless, wantMask),
                 { commandName: mainI18n.t('command.capture') });
             console.log(`[main] захоплено: ${cap.docMode} ${cap.bpc}біт` +
                         `${cap.viaDuplicate ? ' (через дублікат)' : ''}` +
@@ -825,7 +883,7 @@ async function onGenerate(reuse) {
         /* Request-маска: лише для провайдерів, що її приймають, і лише коли є
            контекст навколо. Мʼякість — та сама, що в маски шару. */
         let maskBlob = null;
-        if (provider.supportsMask && s.padPercent > 0 && cap.blob) {
+        if (wantMask && cap.blob) {
             try {
                 const png = capture.buildRectMaskPng(ctx.w, ctx.h, {
                     left: target.left - ctx.left, top: target.top - ctx.top,
@@ -835,6 +893,15 @@ async function onGenerate(reuse) {
                 console.log(`[main] маска ${ctx.w}×${ctx.h}, край ${s.feather} px: ` +
                             `${(png.length / 1024).toFixed(1)} КБ`);
             } catch (e) { console.warn('[main] маска не побудована:', e.message); }
+        }
+
+        /* Інваріант: маска йде ЛИШЕ разом із PNG-входом. Порушення цього контракту
+           сервер не відхиляє — він мовчки ігнорує маску, і модель перемальовує весь
+           кадр. Краще свідомо втратити маску й сказати про це, ніж мовчки. */
+        if (maskBlob && cap.blob && cap.blob.type !== 'image/png') {
+            console.warn(`[main] вхід ${cap.blob.type}, а не PNG — маску не надсилаю: ` +
+                         'OpenAI вимагає однаковий формат входу й маски');
+            maskBlob = null;
         }
 
         /* 4. Генерація — поза модальним контекстом, щоб Photoshop не блокувався */
@@ -903,6 +970,9 @@ async function onGenerate(reuse) {
     } finally {
         abortCtrl = null;
         setBusy(false);
+        // 'auto' могло перемкнутися на curl усередині цього запуску — бейдж має
+        // показувати фактичний маршрут, а не той, що був на старті
+        try { refreshTransportBadge(); } catch (e) {}
     }
 }
 
@@ -934,6 +1004,7 @@ async function initUI() {
     try { await refreshModels(); } catch (e) { console.error('[ui] моделі:', e.message); }
 
     try { initQuality(); } catch (e) { console.error('[ui] якість:', e.message); }
+    try { initTransport(); } catch (e) { console.error('[ui] маршрут мережі:', e.message); }
     try { applyProviderCapabilities(); } catch (e) { console.error('[ui] можливості:', e.message); }
 
     try {
@@ -1059,6 +1130,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Секції, що згортаються. Підтримуємо мишу й клавіатуру та синхронізуємо
     // aria-expanded — у вузькій панелі це ще й надійне джерело стану шеврона.
     for (const [head, body] of [['opts-header', 'opts-body'], ['usage-header', 'usage-body'],
+                                ['net-header', 'net-body'],
                                 ['ref-header', 'ref-body'], ['cache-header', 'cache-body'],
                                 ['preset-header', 'preset-body'], ['history-header', 'history-body'],
                                 ['report-header', 'report-body']]) {
@@ -1079,6 +1151,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 document.addEventListener('exactfill:localechange', () => {
     initQuality();
+    initTransport();
     applyProviderCapabilities();
     renderPresets();
     renderHistory();
