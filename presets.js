@@ -12,7 +12,7 @@ const DEFAULT_PRESETS = [
 class PresetManager {
     constructor() {
         this.presets = [];
-        this.storageKey = 'googleAiPresets';
+        this.storageKey = require('./storage-keys.js').LEGACY.presets;
     }
 
     async load() {
@@ -81,7 +81,7 @@ class PresetManager {
     }
 
     toggleActive(id, isActive) {
-        // Find preset and set active state. 
+        // Find preset and set active state.
         // Note: We might want allow multiple active? User said "toggle them". yes.
         return this.update(id, { active: isActive });
     }

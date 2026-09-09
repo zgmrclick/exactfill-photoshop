@@ -25,7 +25,7 @@ uses a real selection and shows the generated result returned as a precisely pla
 - Precise placement in the original selection, including odd and fractional bounds.
 - Non-destructive Smart Object output and Photoshop-native layer masks.
 - RGB, CMYK, Grayscale and Lab workflows; 8/16/32-bit documents stay unchanged.
-- OpenAI GPT Image and Google Gemini image models in one panel.
+- OpenAI GPT Image (including GPT Image 2.5) and Google Gemini image models in one panel.
 - Edge blending, context control, references, transparent output and lossless input.
 - OpenAI intermediate preview frames when the API and UXP runtime support streaming.
 - Persistent cost statistics, recent history, presets and a local result cache.
@@ -33,7 +33,7 @@ uses a real selection and shows the generated result returned as a precisely pla
 
 ## Install
 
-Download `ExactFill-1.3.2.zip` from [Releases](https://github.com/zgmrclick/exactfill-photoshop/releases),
+Download `ExactFill-1.5.0.zip` from [Releases](https://github.com/zgmrclick/exactfill-photoshop/releases),
 extract it completely, and close Photoshop before copying the folder.
 
 ### Windows

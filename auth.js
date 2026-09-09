@@ -9,6 +9,7 @@
  * ========================================================================== */
 
 const { shell, storage } = require('uxp');
+const authKeys = require('./storage-keys.js').LS;
 const secureStore = storage.secureStorage;
 const authI18n = require('./i18n.js');
 
@@ -54,7 +55,7 @@ const KEY_LINKS = {
 /** Яким ключем цікавиться панель зараз — залежить від обраного провайдера. */
 function activeKeyName() {
     const providers = require('./providers/index.js');
-    const id = localStorage.getItem('ai_provider') || providers.first().id;
+    const id = localStorage.getItem(authKeys.provider) || providers.first().id;
     const p = providers.get(id) || providers.first();
     return p.keyName;
 }
@@ -74,7 +75,7 @@ async function refreshAuthUI() {
     }
 
     const providers = require('./providers/index.js');
-    const p = providers.get(localStorage.getItem('ai_provider')) || providers.first();
+    const p = providers.get(localStorage.getItem(authKeys.provider)) || providers.first();
     const label = document.getElementById('auth-provider-label');
     if (label) label.textContent = p.label;
     const link = document.getElementById('open-key-page');
@@ -89,6 +90,13 @@ async function submitAuth() {
         await setKey(activeKeyName(), value);
         if (input) input.value = '';
         await refreshAuthUI();
+        /* ⚠️ Перелік моделей залежить від КЛЮЧА: доступність питається в
+           /v1/models. Без цієї події щойно введений ключ починав фільтрувати
+           пікер лише після перевідкриття панелі — тобто користувач бачив
+           моделі, яких у нього нема, і отримував 404 замість пояснення. */
+        if (typeof document !== 'undefined' && typeof Event !== 'undefined') {
+            document.dispatchEvent(new Event('exactfill:keychange'));
+        }
     } catch (e) {
         console.error('[auth] ключ не збережено:', e && e.message);
         const status = document.getElementById('auth-status');

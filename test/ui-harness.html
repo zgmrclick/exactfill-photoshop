@@ -48,8 +48,9 @@
         <section class="primary-workflow">
         <div class="field-head">
             <label class="field-title" data-i18n="prompt.label">What should change?</label>
+            <span id="prompt-count" class="char-count near">9412 / 10000</span>
         </div>
-        <textarea id="prompt-input" rows="4" data-i18n-placeholder="prompt.placeholder"
+        <textarea id="prompt-input" maxlength="10000" data-i18n-placeholder="prompt.placeholder"
                   placeholder="Describe the change in the selected area"></textarea>
         <div class="control-grid">
         <div class="control-stack">
@@ -63,11 +64,14 @@
         </div>
         <div class="field quality-field">
             <label class="field-title" data-i18n="field.quality">Quality</label>
-            <div class="seg">
-                <button class="seg-btn" data-i18n="quality.low">Low</button>
-                <button class="seg-btn active" data-i18n="quality.medium">Medium</button>
-                <button class="seg-btn" data-i18n="quality.high">High</button>
-                <button class="seg-btn" data-i18n="quality.auto">Auto</button>
+            <!-- шість рівнів gpt-image-2.5: два ряди по три, класи рядів ставить main.js -->
+            <div class="seg seg-wrap">
+                <button class="seg-btn seg-row-top" data-i18n="quality.low">Low</button>
+                <button class="seg-btn active seg-row-top" data-i18n="quality.medium">Medium</button>
+                <button class="seg-btn seg-row-end seg-row-top" data-i18n="quality.high">High</button>
+                <button class="seg-btn" data-i18n="quality.xhigh">X-high</button>
+                <button class="seg-btn" data-i18n="quality.max">Max</button>
+                <button class="seg-btn seg-row-end" data-i18n="quality.auto">Auto</button>
             </div>
         </div>
         <div class="plan-card">
@@ -101,8 +105,8 @@
             <div id="report-header" class="head" aria-expanded="false"><span class="head-label"><svg class="section-icon" viewBox="0 0 20 20"><circle cx="10" cy="10" r="6"></circle></svg><span data-i18n="report.title">Report a bug</span></span><svg class="chevron" viewBox="0 0 20 20"><path d="M6.5 8l3.5 3.5L13.5 8"></path></svg></div>
             <div id="report-body" class="body hidden">
                 <p class="hint" data-i18n="report.hint">Describe what happened.</p>
-                <textarea id="report-summary" rows="2" data-i18n-placeholder="report.summary"></textarea>
-                <textarea id="report-details" rows="4" data-i18n-placeholder="report.details"></textarea>
+                <textarea id="report-summary" maxlength="200" data-i18n-placeholder="report.summary"></textarea>
+                <textarea id="report-details" maxlength="10000" data-i18n-placeholder="report.details"></textarea>
                 <sp-checkbox id="report-diagnostics" checked data-i18n="report.diagnostics">Include safe diagnostics</sp-checkbox>
                 <sp-button id="report-submit" data-i18n="report.submit">Open GitHub issue</sp-button>
                 <p id="report-status" class="status"></p>

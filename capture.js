@@ -45,8 +45,8 @@ const isSafeMode = mode => SAFE_MODES.some(m => String(mode).toLowerCase() === m
  * масці це стиснення в сотні разів, на фотографії — майже літерали. Тобто
  * 2000×1500 RGB дасть ~9 МБ і кілька секунд роботи в JS.
  *
- * 2 МП — межа, де це ще швидко. Вище автоматично падаємо на JPEG і кажемо про
- * це в консоль, щоб «чому раптом гірше» не було загадкою.
+ * 2 МП — межа, де це ще швидко. Вище неї PNG пише сам Photoshop через дублікат
+ * документа: формат від порогу НЕ залежить, залежить лише виконавець.
  */
 const LOSSLESS_MAX_PX = 2_000_000;
 
@@ -200,9 +200,8 @@ async function captureViaDuplicate(bounds, useLayerOnly, lossless) {
         });
 
         const folder = await uxpStorage.localFileSystem.getTemporaryFolder();
-        // PNG пише сам Photoshop — тут наш кодер не задіяний, тому поріг
-        // швидкості на цей шлях не поширюється; лишаємо його лише для
-        // узгодженості з прямим шляхом.
+        // PNG пише сам Photoshop — наш кодер тут не задіяний, тому поріг
+        // швидкості на цей шлях не поширюється взагалі.
         if (lossless) {
             file = await folder.createFile(`cap_${Date.now()}.png`, { overwrite: true });
             await dup.saveAs.png(file, { compression: 6, interlaced: false }, true);
@@ -229,10 +228,11 @@ async function captureViaDuplicate(bounds, useLayerOnly, lossless) {
  *
  * @param {{left,top,right,bottom}} bounds — цілі межі (geometry.integerTarget)
  * @param {boolean} useLayerOnly — лише активний шар замість зведеного
- * @param {boolean} wantLossless — просити PNG замість JPEG (авто-деградація вище порогу)
+ * @param {boolean} wantLossless — просити PNG замість JPEG. Вище LOSSLESS_MAX_PX
+ *        це означає шлях через дублікат, а НЕ мовчазне повернення до JPEG.
  * @param {boolean} requirePng — PNG обов'язковий: у запит іде маска, а OpenAI вимагає
- *        однаковий формат входу й маски. Тоді поріг НЕ деградує формат, а лише
- *        відправляє нас на шлях через дублікат, де PNG пише сам Photoshop.
+ *        однаковий формат входу й маски. Практично рівносильний wantLossless;
+ *        лишається окремим, бо це вимога протоколу, а не побажання користувача.
  * @returns {Promise<{blob:Blob, docMode:string, bpc:number, viaDuplicate:boolean, lossless:boolean}>}
  */
 async function captureRegion(bounds, useLayerOnly = false, wantLossless = true,
@@ -248,22 +248,21 @@ async function captureRegion(bounds, useLayerOnly = false, wantLossless = true,
         throw new Error(captureI18n.t('capture.emptyArea', { width: w, height: h }));
     }
 
-    let lossless = wantLossless || requirePng;
-    // Поріг стосується лише НАШОГО JS-кодера. Коли PNG обов'язковий, деградувати
-    // формат не можна: JPEG-вхід із PNG-маскою сервер приймає й тихо ігнорує
-    // маску — модель перемальовує весь кадр. Тому йдемо через дублікат, де PNG
-    // пише Photoshop і поріг ні до чого.
-    let viaDuplicateOnly = false;
-    if (lossless && w * h > LOSSLESS_MAX_PX) {
-        if (requirePng) {
-            viaDuplicateOnly = true;
-            console.log(`[capture] ${w}×${h} — вище порогу, але маска вимагає PNG: ` +
-                        'пишу PNG через дублікат документа');
-        } else {
-            lossless = false;
-            console.log(`[capture] ${w}×${h} = ${(w * h / 1e6).toFixed(1)} МП — вище порогу ` +
-                        `${LOSSLESS_MAX_PX / 1e6} МП, беру JPEG замість PNG`);
-        }
+    const lossless = wantLossless || requirePng;
+    /* Поріг стосується лише НАШОГО JS-кодера (fixed-Huffman без справжнього
+       deflate): на фотографії 2000×1500 він дає ~9 МБ і кілька секунд у JS.
+       Photoshop свій PNG пише сам і жодного порогу не потребує.
+
+       ⚠️ РАНІШЕ ТУТ БУЛА ТИХА ВТРАТА ФУНКЦІЇ: вище порогу галка «вхід без втрат»
+       мовчки ставала JPEG — але лише коли маска не потрібна. Тобто той самий
+       перемикач працював чи ні залежно від зовсім іншого налаштування (відсотка
+       контексту). Тепер поріг не скасовує вибір користувача, а лише перемикає
+       ВИКОНАВЦЯ: вище нього PNG пише Photoshop через дублікат документа. */
+    const viaDuplicateOnly = lossless && w * h > LOSSLESS_MAX_PX;
+    if (viaDuplicateOnly) {
+        console.log(`[capture] ${w}×${h} = ${(w * h / 1e6).toFixed(1)} МП — вище порогу ` +
+                    `${LOSSLESS_MAX_PX / 1e6} МП для власного кодера: PNG пише Photoshop ` +
+                    'через дублікат документа');
     }
 
     if (!viaDuplicateOnly && isSafeMode(docMode)) {
@@ -282,4 +281,37 @@ async function captureRegion(bounds, useLayerOnly = false, wantLossless = true,
     return { blob, docMode, bpc, viaDuplicate: true, lossless };
 }
 
-module.exports = { captureRegion, buildRectMaskPng, isSafeMode, LOSSLESS_MAX_PX };
+/**
+ * Маска для запиту — або null із поясненням, ЧОМУ її нема.
+ *
+ * ⚠️ ІНВАРІАНТ, ЗАРАДИ ЯКОГО ЦЕ ОКРЕМА ФУНКЦІЯ: маска їде ЛИШЕ разом із
+ * PNG-входом. OpenAI вимагає, щоб вхід і маска були одного формату, і
+ * розбіжність сервер НЕ відхиляє — він мовчки ігнорує маску, а модель
+ * перемальовує весь кадр. Симптом у користувача: «модель не бачить виділення».
+ * Тому краще свідомо втратити маску й записати причину, ніж відправити запит,
+ * який тихо зробить не те.
+ *
+ * Раніше це жило рядками всередині onGenerate, і єдиним гейтом був регекс по
+ * тексту main.js у platform.test.js. Тепер інваріант перевіряється як функція.
+ *
+ * @returns {{blob: Blob|null, bytes: number, reason: string}} reason непорожній
+ *          рівно тоді, коли маски не буде
+ */
+function maskForRequest({ ctx, target, feather = 0, input }) {
+    if (!input) return { blob: null, bytes: 0, reason: 'входу нема — маска ні до чого' };
+    if (input.type !== 'image/png') {
+        return { blob: null, bytes: 0,
+                 reason: `вхід ${input.type}, а не PNG: OpenAI вимагає однаковий формат входу й маски` };
+    }
+    try {
+        const png = buildRectMaskPng(ctx.w, ctx.h, {
+            left: target.left - ctx.left, top: target.top - ctx.top,
+            right: target.right - ctx.left, bottom: target.bottom - ctx.top,
+        }, feather);
+        return { blob: new Blob([png], { type: 'image/png' }), bytes: png.length, reason: '' };
+    } catch (e) {
+        return { blob: null, bytes: 0, reason: `маска не побудована: ${e.message}` };
+    }
+}
+
+module.exports = { captureRegion, buildRectMaskPng, maskForRequest, isSafeMode, LOSSLESS_MAX_PX };

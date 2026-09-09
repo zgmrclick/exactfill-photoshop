@@ -1,5 +1,6 @@
 /* English/Ukrainian UI localization with automatic host-locale detection. */
-const STORAGE_KEY = 'exactfill_locale';
+const i18nKeys = require('./storage-keys.js').LS;
+const STORAGE_KEY = i18nKeys.locale;
 const SUPPORTED = ['en', 'uk'];
 
 const STRINGS = {
@@ -24,6 +25,11 @@ const STRINGS = {
         'quality.low': 'Low',
         'quality.medium': 'Medium',
         'quality.high': 'High',
+        'quality.xhigh': 'X-high',
+        'quality.max': 'Max',
+        'model.sunburst': 'GPT Image 2.5, base model — best quality. Adds the X-high and Max effort levels.',
+        'model.flare': 'GPT Image 2.5, small model — fastest and cheapest of the 2.5 family.',
+        'error.modelNotOpen': 'The model {model} is not open for your API key. The name is correct and the model exists \u2014 your account simply has no access to it yet. Pick another model, or check access at platform.openai.com.',
         'action.generate': 'Generate',
         'action.cancel': 'Cancel',
         'action.regenerate': 'Regenerate',
@@ -50,7 +56,7 @@ const STRINGS = {
         'options.layerOnly': 'Active layer only',
         'options.layerOnlyTitle': 'Send only the active layer instead of the visible composite',
         'options.lossless': 'Lossless input',
-        'options.losslessTitle': 'PNG instead of JPEG. Areas above 2 MP automatically use JPEG',
+        'options.losslessTitle': 'PNG instead of JPEG. Large areas are written by Photoshop itself, so the choice always holds',
         'options.transparent': 'Transparent background',
         'options.transparentTitle': 'background=transparent — OpenAI only',
         'options.ignorePixels': 'Ignore pixels',
@@ -82,6 +88,7 @@ const STRINGS = {
         'report.opening': 'Opening the report in your browser…',
         'report.openError': 'Could not open GitHub: {error}',
         'report.consent': 'Open a new ExactFill issue on GitHub',
+        'report.truncated': '_(text shortened so GitHub accepts the link — paste the rest here)_',
         'language.label': 'Language',
         'privacy.open': 'Privacy',
         'privacy.consent': 'Open the ExactFill privacy policy',
@@ -97,7 +104,10 @@ const STRINGS = {
         'plan.selectArea': 'Select an area',
         'plan.emptySelection': 'The selection is empty',
         'plan.defaultSize': 'model default size',
-        'plan.inputJpegLarge': 'input JPEG (area > 2 MP)',
+        'plan.inputPngLarge': 'input PNG (large area, written by Photoshop)',
+        'plan.inputNone': 'no input image',
+        'plan.withMask': 'with mask',
+        'plan.experimental': 'experimental resolution',
         'plan.inputPng': 'input PNG',
         'plan.inputJpeg': 'input JPEG',
         'plan.request': 'Request: {what}{input} · selection {width}×{height}{context}{refs}',
@@ -212,6 +222,14 @@ const STRINGS = {
         'quality.low': 'Низька',
         'quality.medium': 'Середня',
         'quality.high': 'Висока',
+        // «Дуже висока» — 63 px при 65 доступних у шестикнопковому перемикачі
+        // на панелі 230 px. Двох пікселів запасу мало: у Photoshop шрифт
+        // Adobe Clean, не браузерний fallback, яким це міряли.
+        'quality.xhigh': 'Висока+',
+        'quality.max': 'Максимум',
+        'model.sunburst': 'GPT Image 2.5, базова модель — найкраща якість. Додає рівні «Висока+» і «Максимум».',
+        'model.flare': 'GPT Image 2.5, мала модель — найшвидша й найдешевша в родині 2.5.',
+        'error.modelNotOpen': 'Модель {model} не відкрита для вашого ключа API. Назва правильна й модель існує \u2014 просто вашому акаунту її ще не дали. Оберіть іншу модель або перевірте доступ на platform.openai.com.',
         'action.generate': 'Генерувати',
         'action.cancel': 'Скасувати',
         'action.regenerate': 'Перегенерувати',
@@ -238,7 +256,7 @@ const STRINGS = {
         'options.layerOnly': 'Лише активний шар',
         'options.layerOnlyTitle': 'Надіслати лише активний шар замість зведеного зображення',
         'options.lossless': 'Вхід без втрат',
-        'options.losslessTitle': 'PNG замість JPEG. Вище 2 МП автоматично використовується JPEG',
+        'options.losslessTitle': 'PNG замість JPEG. Великі області пише сам Photoshop, тому вибір діє завжди',
         'options.transparent': 'Прозорий фон',
         'options.transparentTitle': 'background=transparent — лише OpenAI',
         'options.ignorePixels': 'Ігнорувати пікселі',
@@ -270,6 +288,7 @@ const STRINGS = {
         'report.opening': 'Відкриваю звіт у браузері…',
         'report.openError': 'Не вдалося відкрити GitHub: {error}',
         'report.consent': 'Відкрити новий звіт ExactFill на GitHub',
+        'report.truncated': '_(текст скорочено, щоб GitHub прийняв посилання — решту вставте сюди)_',
         'language.label': 'Мова',
         'privacy.open': 'Приватність',
         'privacy.consent': 'Відкрити політику приватності ExactFill',
@@ -285,7 +304,10 @@ const STRINGS = {
         'plan.selectArea': 'Виділіть область',
         'plan.emptySelection': 'Виділення порожнє',
         'plan.defaultSize': 'розмір за замовчуванням моделі',
-        'plan.inputJpegLarge': 'вхід JPEG (область > 2 МП)',
+        'plan.inputPngLarge': 'вхід PNG (велика область, пише Photoshop)',
+        'plan.inputNone': 'без вхідного зображення',
+        'plan.withMask': 'з маскою',
+        'plan.experimental': 'експериментальна роздільність',
         'plan.inputPng': 'вхід PNG',
         'plan.inputJpeg': 'вхід JPEG',
         'plan.request': 'Запит: {what}{input} · виділення {width}×{height}{context}{refs}',
@@ -389,7 +411,7 @@ function detectLocale() {
     const saved = safeGet(STORAGE_KEY);
     if (SUPPORTED.includes(saved)) return saved;
     // Existing private builds were Ukrainian; preserve their UI on upgrade.
-    if (safeGet('ai_provider') !== null || safeGet('ai_prompt') !== null) return 'uk';
+    if (safeGet(i18nKeys.provider) !== null || safeGet(i18nKeys.prompt) !== null) return 'uk';
     try {
         const locale = require('uxp').host.uiLocale || '';
         if (String(locale).toLowerCase().startsWith('uk')) return 'uk';

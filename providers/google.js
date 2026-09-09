@@ -25,8 +25,16 @@ const BASE = 'https://generativelanguage.googleapis.com/v1beta/';
 /** Gemini не приймає пікселі — лише співвідношення сторін і рівень розміру. */
 const ASPECTS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
 
-const CAPS_PRO   = { arbitrary: false, aspects: ASPECTS, imageSizes: ['1K', '2K', '4K'] };
-const CAPS_FLASH = { arbitrary: false, aspects: ASPECTS, imageSizes: ['1K', '2K'] };
+/**
+ * `qualities` тут не їде в запит — Gemini рівня якості не приймає взагалі.
+ * Але той самий перемикач у панелі обирає imageSize (див. geometry.planRequest),
+ * тому список має бути оголошений: main.js малює кнопки з caps, а не з
+ * глобальної константи. `xhigh`/`max` — суто OpenAI 2.5, тут їх немає.
+ */
+const Q_CLASSIC = ['low', 'medium', 'high', 'auto'];
+
+const CAPS_PRO   = { arbitrary: false, aspects: ASPECTS, imageSizes: ['1K', '2K', '4K'], qualities: Q_CLASSIC };
+const CAPS_FLASH = { arbitrary: false, aspects: ASPECTS, imageSizes: ['1K', '2K'], qualities: Q_CLASSIC };
 
 const FALLBACK_MODELS = [
     { id: 'models/gemini-3-pro-image',          label: 'Gemini 3 Pro Image',        caps: CAPS_PRO },

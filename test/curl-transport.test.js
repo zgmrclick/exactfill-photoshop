@@ -12,13 +12,11 @@ test('the API key never reaches the command line, only the config file', () => {
     });
     assert.match(config, /header = "Authorization: Bearer sk-secret-value"/);
     assert.match(config, /data-binary = "@\/tmp\/x\.body"/);
-    // ps(1) показує аргументи будь-якого процесу — у команді секретів бути не може
-    const cmd = t.buildCommand({
-        plat: 'darwin', curlPath: '/usr/bin/curl',
-        configFile: '/tmp/x.cfg', codeFile: '/tmp/x.code',
-    });
-    assert.doesNotMatch(cmd, /sk-secret-value/);
-    assert.doesNotMatch(cmd, /Authorization/);
+    // ps(1) показує аргументи будь-якого процесу — у команді секретів бути не може.
+    // Перевіряємо саме згенерований скрипт: це єдине, що реально доходить до shell.
+    const jsx = t.buildJobJsx({ configFile: '/tmp/x.cfg', codeFile: '/tmp/x.code' });
+    assert.doesNotMatch(jsx, /sk-secret-value/);
+    assert.doesNotMatch(jsx, /Authorization/);
 });
 
 test('status and curl exit code travel through write-out, not through the shell', () => {
@@ -35,16 +33,15 @@ test('status and curl exit code travel through write-out, not through the shell'
 });
 
 test('each platform gets its own async launch and quoting', () => {
-    const posix = t.buildCommand({ plat: 'darwin', curlPath: '/usr/bin/curl',
-        configFile: "/tmp/it's.cfg", codeFile: '/tmp/a.code' });
-    assert.match(posix, / &$/, 'POSIX backgrounds with &');
-    assert.match(posix, /'\/tmp\/it'\\''s\.cfg'/, "single quote inside a path must be escaped");
-
-    const win = t.buildCommand({ plat: 'win32', curlPath: 'C:/W/curl.exe',
-        configFile: 'C:/Temp/a.cfg', codeFile: 'C:/Temp/a.code' });
-    assert.match(win, /^start "" \/b /, 'cmd needs start /b; & there is sequential, not background');
-    assert.match(win, /"C:\/Temp\/a\.cfg"/, 'cmd has no single quotes');
-    assert.doesNotMatch(win, /'/);
+    // Обидві гілки живуть в одному згенерованому скрипті: ES3 лише вибирає
+    // готовий рядок за $.os, а лапки вже поставив shellQuote під час збірки.
+    const jsx = t.buildJobJsx({ configFile: "/tmp/it's.cfg", codeFile: '/tmp/a.code' });
+    assert.match(jsx, /cmd \+ " &"/, 'POSIX backgrounds with &');
+    assert.match(jsx, /start \\"\\" \/b /, 'cmd needs start /b; & there is sequential, not background');
+    assert.ok(jsx.includes(JSON.stringify(t.shellQuote('darwin', "/tmp/it's.cfg"))),
+        'single quote inside a path must be escaped by shellQuote, not by a second implementation');
+    assert.ok(jsx.includes(JSON.stringify(t.shellQuote('win32', "/tmp/it's.cfg"))),
+        'the Windows branch quotes with double quotes');
 });
 
 test('config values escape backslashes so Windows paths survive', () => {
@@ -153,4 +150,55 @@ test('streaming asks curl not to buffer, otherwise there is no live preview', ()
     assert.match(streamed, /^no-buffer$/m);
     const plain = t.buildCurlConfig({ url: 'https://x/y', outFile: '/o', headerFile: '/h' });
     assert.doesNotMatch(plain, /no-buffer/);
+});
+
+/* ── Гейти на життєвий цикл тимчасових файлів ──────────────────────────────
+ *
+ * ⚠️ ЧОМУ СТАТИЧНІ, А НЕ ЮНІТИ: curlFetch зсередини робить require('uxp') і
+ * require('photoshop'). Під node їх нема, а переписувати модуль заради
+ * ін'єкції — більший ризик, ніж сама перевірка. Тому читаємо джерело як текст:
+ * рівно той самий прийом, що вже стоїть у storage.test.js на виклик load().
+ */
+const fs = require('node:fs');
+const path = require('node:path');
+const SRC = fs.readFileSync(path.join(__dirname, '..', 'providers', 'curl-transport.js'), 'utf8');
+const slice = (from, to) => SRC.slice(SRC.indexOf(from), SRC.indexOf(to));
+
+test('файли curl прибираються, навіть якщо запит не стартував', () => {
+    // ⚠️ ЦЕ НЕ ГІГІЄНА ДИСКУ, А ЄДИНЕ, ЩО ПРИБИРАЄ КЛЮЧ. Заголовок Authorization
+    // свідомо винесено у файл --config, щоб він не світився в `ps` (тест вище).
+    // Отже .cfg на диску == ключ API у відкритому вигляді. runJsx кидає штатно —
+    // для цього в i18n навіть є окремий рядок transport.bridgeRefused, — і
+    // раніше цей throw лишав .cfg у temp назавжди.
+    const body = slice('async function curlFetch', 'async function fetchLike');
+    assert.match(body, /catch[\s\S]{0,200}removeQuietly\(created\)/,
+        'curlFetch мусить прибрати created у catch і кинути помилку далі');
+});
+
+test('струмовий запит прибирає файли, навіть якщо споживач кинув виняток', () => {
+    // ⚠️ Раніше removeQuietly жив ЛИШЕ всередині read() під `if (done)`. Це
+    // працює, поки споживач дочитує до кінця. Але requestStream у http.js
+    // викликає onEvent прямо в циклі: варто обробнику preview кинути виняток —
+    // і read() більше не покличуть, а .cfg (ключ) і .body (зображення
+    // користувача) лишаються в temp.
+    const body = slice('async function fetchLikeStream', '\nmodule.exports');
+    assert.match(body, /pump[\s\S]{0,600}removeQuietly/,
+        'прибирання мусить висіти на завершенні pump, а не лише на read()');
+});
+
+test('команду для shell збирає та сама функція, яку перевіряють тести', () => {
+    // ⚠️ РОЗБІЖНІСТЬ ТЕСТА Й РАНТАЙМУ: buildCommand/shellQuote покриті тестами,
+    // але жодного разу не викликаються — справжню команду ES3-скрипт збирав сам
+    // своєю q(), яка лапки всередині шляху не екранувала взагалі. Тобто тести
+    // зеленіли на функції, якої в бою нема. Той самий клас, що й забутий
+    // presetManager.load().
+    const risky = "/tmp/it's here.cfg";
+    const jsx = t.buildJobJsx({ configFile: risky, codeFile: '/tmp/a.code' });
+    // не «схоже на екранування», а буквально результат тестованої функції
+    assert.ok(jsx.includes(JSON.stringify(t.shellQuote('darwin', risky))),
+        'апостроф у шляху мусить екранувати саме shellQuote');
+    assert.doesNotMatch(jsx, /function q\(/,
+        'жодної другої реалізації лапкування в ES3 — екранує лише shellQuote');
+    assert.equal(typeof t.buildCommand, 'undefined',
+        'buildCommand видалено: одна реалізація — одне місце для помилки');
 });

@@ -3,7 +3,7 @@ const MAX_HISTORY_ITEMS = 20;
 class HistoryManager {
     constructor() {
         this.history = [];
-        this.storageKey = 'nanobanana_prompt_history';
+        this.storageKey = require('./storage-keys.js').LEGACY.history;
     }
 
     async load() {

@@ -113,5 +113,48 @@ console.log('\n=== buildRectMaskPng: мʼякий край ===');
   console.log(`  вузька область + край 64 px: зібралось, ${tiny.length} B ✓ (feather зажимається)`);
 }
 
+// 6. Вікно deflate. РЕГРЕСІЯ: RLE брав match із попереднього рядка на відстані
+//    rowStride, але deflate дозволяє distance ≤ 32768 (RFC 1951 §3.2.5). Для
+//    широкого полотна rowStride вилазив за вікно, putDistance тихо писав
+//    обрізане число — і потік ставав НЕВАЛІДНИМ. Симптом у користувача: маска
+//    або вхід — побитий PNG, сервер відповідає 400 або мовчки ігнорує маску.
+//    Поріг LOSSLESS_MAX_PX (2 МП) НЕ рятує: смуга 11000×180 = 1.98 МП його
+//    проходить, а stride 33001 — уже за вікном. Маска порога не має взагалі.
+console.log('\n=== вікно deflate (distance ≤ 32768) ===');
+{
+  for (const stride of [32767, 32768, 32769, 40000, 65537]) {
+    const rows = new Uint8Array(200000);
+    for (let i = 0; i < rows.length; i++) rows[i] = (i % stride) & 255;  // рядки-близнюки
+    let ok = false, note = '';
+    try {
+      const back = zlib.inflateSync(Buffer.from(P.deflateRle(rows, stride)));
+      ok = back.length === rows.length && back.every((v, i) => v === rows[i]);
+    } catch (e) { note = ' ' + e.message; }
+    console.log(`  stride ${String(stride).padStart(5)}: ${ok ? '✓ валідний потік' : '✗ ПОТІК ПОБИТО' + note}`);
+    if (!ok) fail++;
+  }
+  // Реальні розміри, на яких це вилазить у користувача.
+  for (const [w, h, what] of [[8192, 64, 'маска RGBA'], [10923, 180, 'вхід RGB']]) {
+    let ok = false, note = '';
+    try {
+      const png = what.includes('маска')
+        ? P.buildRectMaskPng(w, h, { left: 10, top: 10, right: w - 10, bottom: h - 10 }, 8)
+        : P.encodePng(new Uint8Array(w * h * 3).fill(0x77), w, h, 3);
+      const rd = o => ((png[o]<<24)|(png[o+1]<<16)|(png[o+2]<<8)|png[o+3])>>>0;
+      let off = 8, idat = [];
+      while (off + 8 <= png.length) {
+        const len = rd(off), t = String.fromCharCode(png[off+4],png[off+5],png[off+6],png[off+7]);
+        if (t === 'IDAT') idat.push(png.subarray(off + 8, off + 8 + len));
+        off += 12 + len; if (t === 'IEND') break;
+      }
+      const raw = zlib.inflateSync(Buffer.concat(idat.map(Buffer.from)));
+      const comps = what.includes('маска') ? 4 : 3;
+      ok = raw.length === h * (w * comps + 1);
+    } catch (e) { note = ' ' + e.message; }
+    console.log(`  ${what} ${w}×${h}: ${ok ? '✓ читається' : '✗ ПОБИТО' + note}`);
+    if (!ok) fail++;
+  }
+}
+
 console.log('\nПРОВАЛІВ:',fail);
 process.exit(fail?1:0);

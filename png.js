@@ -98,8 +98,15 @@ function putLength(bw, len) {
     if (LEN_EXTRA[i]) bw.bits(len - LEN_BASE[i], LEN_EXTRA[i]);
 }
 
+/** Найбільша відстань, на яку дозволено посилатися: вікно deflate — 32 КіБ. */
+const MAX_DIST = 32768;
+
 /** Дистанція match'у — у fixed Huffman коди дистанцій рівно 5 біт. */
 function putDistance(bw, dist) {
+    // Не тиха деградація, а виняток: за вікном putDistance писав би обрізане
+    // число, і потік ставав невалідним лише для розпаковувача — помилка
+    // спливала аж на adler32, за кілометр від причини.
+    if (dist < 1 || dist > MAX_DIST) throw new Error(`deflate: distance ${dist} поза вікном 1..${MAX_DIST}`);
     let i = DIST_BASE.length - 1;
     while (DIST_BASE[i] > dist) i--;
     bw.code(i, 5);
@@ -119,6 +126,15 @@ function putDistance(bw, dist) {
  * @param {number} rowStride — довжина рядка в байтах разом із байтом фільтра
  */
 function deflateRle(data, rowStride) {
+    /* ⚠️ РЕГРЕСІЯ, ЯКУ ТУТ ЗАКРИТО: рядок ширший за вікно deflate (32 КіБ)
+       посилатися на попередній рядок не може — це заборонено форматом, а не
+       нашим вибором. Раніше ми все одно пробували, putDistance писав обрізану
+       відстань, і PNG виходив побитим. Реально це ловилося на панорамних
+       полотнах: маска від 8192 px завширшки (RGBA) і вхід від 10923 px (RGB).
+       Тепер для таких рядків лишається лише match на відстані 1 — для маски
+       з довгими однорідними прогонами він і дає майже все стиснення. */
+    const rowDist = (rowStride > 0 && rowStride <= MAX_DIST) ? rowStride : 0;
+
     const bw = new BitWriter();
     bw.bits(1, 1);   // BFINAL = 1
     bw.bits(1, 2);   // BTYPE = 01 (fixed Huffman)
@@ -129,16 +145,16 @@ function deflateRle(data, rowStride) {
         let bestLen = 0, bestDist = 0;
 
         // повтор того самого байта
-        if (i + 3 <= n && data[i] === data[i - 1] && i > 0) {
+        if (i > 0 && i + 3 <= n && data[i] === data[i - 1]) {
             let l = 0;
             while (l < 258 && i + l < n && data[i + l] === data[i - 1]) l++;
             if (l >= 3) { bestLen = l; bestDist = 1; }
         }
         // повтор рядка вище — саме він дає основне стиснення на масках
-        if (rowStride > 0 && i >= rowStride) {
+        if (rowDist > 0 && i >= rowDist) {
             let l = 0;
-            while (l < 258 && i + l < n && data[i + l] === data[i + l - rowStride]) l++;
-            if (l >= 3 && l > bestLen) { bestLen = l; bestDist = rowStride; }
+            while (l < 258 && i + l < n && data[i + l] === data[i + l - rowDist]) l++;
+            if (l >= 3 && l > bestLen) { bestLen = l; bestDist = rowDist; }
         }
 
         if (bestLen >= 3) {
@@ -324,6 +340,6 @@ function buildRectMaskPng(width, height, rect, feather = 0) {
 }
 
 module.exports = {
-    crc32, adler32, w32, makeChunk, deflateRle,
+    crc32, adler32, w32, makeChunk, deflateRle, MAX_DIST,
     encodePng, readPngSize, setPngResolution, buildRectMaskPng,
 };

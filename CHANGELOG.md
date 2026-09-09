@@ -1,5 +1,54 @@
 # Changelog
 
+## 1.5.0 — 2026-09-09
+
+- **Added GPT Image 2.5** in both variants: `gpt-image-2.5-sunburst` (base model, best quality) and
+  `gpt-image-2.5-flare` (small model, fastest and cheapest of the family). Both accept arbitrary
+  output resolutions, so the plugin keeps asking for the exact proportions of your selection. The
+  model picker explains which is which on hover; existing installs keep the model they already use.
+- **The model picker no longer hides models based on the `/v1/models` catalogue.** That catalogue
+  lists what OpenAI chose to enumerate, not what a key is allowed to call: measured on 2026-09-09,
+  both 2.5 variants generate images on a key whose catalogue does not list them. Filtering by it
+  would have hidden models that work. When a model genuinely is not open to your account, the
+  request now fails with a sentence that says so, instead of a bare `HTTP 404`.
+- **Added the X-high and Max effort levels** that 2.5 introduces. They do not request more pixels —
+  `High` already reaches the model's ceiling — they buy more rendering effort at the same
+  resolution, and you pay for that in output tokens. The plan card therefore shows the same
+  megapixels for High, X-high and Max, which is the truth rather than a rounding error.
+- **Quality levels now belong to the model, not to the panel.** Only 2.5 accepts X-high and Max;
+  sending them to GPT Image 1 is an HTTP 400 instead of a picture. Switching to a model that lacks
+  the level you picked steps *down* to the nearest one it does accept — never up, so a model switch
+  can never silently raise your bill — and your preference returns as soon as it is available again.
+- **A prompt longer than about 256 characters silently stopped accepting new text.** This was never
+  a limit anyone set: a Photoshop UXP text field applies an undocumented default unless the markup
+  declares one, and prompts were being quietly cut short with no error, no truncated tail and no
+  event. Every text field in the panel — prompt, bug report, prompt presets and the API key box —
+  now declares an explicit limit, and the prompt shows a character counter once it nears that limit
+  so the ceiling can never be invisible again. A regression test fails the build if any field is
+  added without one.
+- **The "Lossless input" checkbox now always holds.** Above 2 MP it used to quietly fall back to
+  JPEG — but only when no mask was being sent, so the very same checkbox worked or not depending on
+  an unrelated setting (the context percentage). The 2 MP threshold only ever applied to the
+  plugin's own PNG encoder; above it Photoshop writes the PNG itself, which it could do all along.
+- **The plan card now names the request that will actually be sent.** With a context percentage
+  above 0 the plugin has to send PNG, because OpenAI requires the input and the mask to share a
+  format — but the card read only the "Lossless input" checkbox and promised JPEG. Measured in
+  Photoshop on 2026-09-09: the card said 58 KB JPEG while 1227 KB of PNG went out. The card now
+  also says "with mask", because a mask changes what the model does — it regenerates the masked
+  area rather than editing what is already there — and that is worth knowing before you pay for it.
+- **"Regenerate" now honours a changed context percentage.** It reused the stored context frame
+  along with the area, so moving the slider before pressing it changed nothing: same frame, same
+  price, no hint anywhere in the panel.
+- `input_fidelity` is now decided by the model's declared capabilities instead of a hard-coded name
+  check, so a future model cannot inherit a parameter it does not accept.
+- The plan card warns when a request exceeds 2560×1440, which OpenAI documents as experimental —
+  that is also the most expensive thing the panel can ask for.
+- Prices verified 2026-09-09; GPT Image 2.5 is billed at the same rate as GPT Image 2. A new test
+  fails the build if a model is added to the picker without a matching entry in the price table.
+- Removed `rows` from every textarea: UXP ignores it (documented known issue) and the height has
+  always come from CSS, so the attribute only misled whoever read the markup next.
+
+
 ## 1.4.0 — 2026-08-14
 
 - Added a network route option: when a firewall blocks Photoshop itself, requests can be made by the

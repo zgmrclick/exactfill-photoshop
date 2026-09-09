@@ -4,7 +4,7 @@
  *  Чистий модуль: без Photoshop/DOM/localStorage, тому тарифну арифметику й
  *  часові зрізи можна перевірити звичайним `node --test`.
  *
- *  Ціни — стандартний платний API, USD, перевірено 2026-08-11:
+ *  Ціни — стандартний платний API, USD, перевірено 2026-09-09:
  *    OpenAI: https://developers.openai.com/api/docs/pricing
  *            https://developers.openai.com/api/docs/models/gpt-image-1.5
  *    Google: https://ai.google.dev/gemini-api/docs/pricing
@@ -13,11 +13,21 @@
  *  не змінить старі витрати заднім числом.
  * ========================================================================== */
 
-const PRICE_VERSION = '2026-08-11';
+const PRICE_VERSION = '2026-09-09';
 const MAX_ENTRIES = 500;
 const MAX_AGE_DAYS = 365;
 
 const OPENAI = {
+    // gpt-image-2.5 тарифікується так само, як gpt-image-2. Таблиці «за
+    // картинку» в нього немає взагалі: рівні xhigh/max відрізняються саме
+    // кількістю вихідних токенів, тому фіксована ціна тут була б вигадкою.
+    // Якщо API не поверне output usage — записуємо вартість як невідому.
+    'gpt-image-2.5-sunburst': {
+        textIn: 5, imageIn: 8, imageOut: 30,
+    },
+    'gpt-image-2.5-flare': {
+        textIn: 5, imageIn: 8, imageOut: 30,
+    },
     'gpt-image-2': {
         textIn: 5, imageIn: 8, imageOut: 30,
     },

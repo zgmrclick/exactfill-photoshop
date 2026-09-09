@@ -197,14 +197,21 @@ async function request(url, { method = 'GET', headers = {}, body, timeoutMs = 30
 
 function errorFromBody(res, text) {
     let msg = `HTTP ${res.status}`;
+    let code = null;
     try {
         const j = JSON.parse(text);
         msg = j?.error?.message || j?.error?.status || j?.message || msg;
+        // ⚠️ Сам код помилки, а не лише текст: статус 404 однаково стоїть і на
+        // «немає такої моделі», і на «немає такого ендпоінта», а розрізняти їх
+        // за англійським реченням — крихко. Провайдери реагують саме на code.
+        code = j?.error?.code || j?.error?.type || null;
     } catch (e) {
         if (text) msg += `: ${text.slice(0, 300)}`;
     }
     const ra = res.headers && res.headers.get ? res.headers.get('retry-after') : null;
-    return new HttpError(res.status, msg, parseRetryAfter(ra));
+    const err = new HttpError(res.status, msg, parseRetryAfter(ra));
+    err.code = code;
+    return err;
 }
 
 /** Retry-After буває секундами або HTTP-датою; обидві форми стандартні. */

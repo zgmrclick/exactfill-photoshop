@@ -16,7 +16,7 @@
 const uxpStorage = require('uxp').storage;
 
 const MAX_ENTRIES = 8;
-const INDEX_KEY = 'ai_result_cache_v1';
+const INDEX_KEY = require('./storage-keys.js').LS.cache;
 const SUBFOLDER = 'results';
 
 /** base64 з байтів без FileReader — в UXP він неповний. */

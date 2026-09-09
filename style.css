@@ -130,7 +130,22 @@ body {
     line-height: 1.45;
     resize: vertical;
 }
-#prompt-input { min-height: 88px; margin: 0 0 10px; }
+/* Довгий промпт має прокручуватись усередині поля, а не розтягувати панель.
+   Це не має стосунку до стелі введення — її знімає maxlength у розмітці. */
+#prompt-input { min-height: 88px; max-height: 220px; overflow-y: auto; margin: 0 0 10px; }
+
+/* Лічильник символів. Показуємо лише коли текст наблизився до межі: постійне
+   «12 / 10000» у 230-піксельній панелі — шум, а от мовчазна стеля коштувала
+   користувачам обрізаних промптів. */
+.char-count {
+    flex: 0 0 auto;
+    color: var(--fg-dim);
+    font-size: 9px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+.char-count.near { color: var(--warning); }
+.char-count.full { color: var(--danger); font-weight: 600; }
 #report-summary,
 #report-details { min-height: 42px; margin: 0 0 var(--space-2); }
 #report-details { min-height: 72px; }
@@ -195,6 +210,10 @@ sp-slider { width: 100%; }
 }
 .seg-btn {
     flex: 1 1 0;
+    /* ⚠️ ОБОВ'ЯЗКОВО: глобального box-sizing у цьому файлі немає, а в кнопки є
+       border-right. Без border-box він додається до flex-basis, і три кнопки по
+       33.333 % дають 100 % + 3px — рядок переповнюється й переносить третю. */
+    box-sizing: border-box;
     min-width: 0;
     min-height: 32px;
     padding: 5px 2px;
@@ -211,6 +230,19 @@ sp-slider { width: 100%; }
     cursor: pointer;
 }
 .seg-btn:last-child { border-right: none; }
+
+/* Два ряди по три — коли рівнів більше чотирьох (gpt-image-2.5).
+   Класи рядів ставить main.js: покладатись на :nth-child у UXP не можна.
+
+   ⚠️ ВИМІРЯНО В PS 27.5.0: з flex-basis рівно 33.333 % рядок переповнювався
+   на кілька пікселів і кнопки лягали ПО ДВІ, а не по три — при тому що в
+   браузерному стенді все було правильно. Тому базис із запасом: 3 × 30 % = 90 %
+   влазить завжди, 4 × 30 % = 120 % гарантовано переноситься. Відсоток, а не
+   пікселі, тому поведінка не залежить від ширини панелі. */
+.seg-wrap { flex-wrap: wrap; }
+.seg-wrap .seg-btn { flex: 1 1 30%; }
+.seg-wrap .seg-btn.seg-row-end { border-right: none; }
+.seg-wrap .seg-btn.seg-row-top { border-bottom: 1px solid var(--line); }
 .seg-btn:hover,
 .seg-btn:focus { color: var(--fg); background: var(--surface-hover); outline: none; }
 .seg-btn.active { color: #fff; background: var(--accent); }

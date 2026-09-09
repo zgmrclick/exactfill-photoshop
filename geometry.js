@@ -79,6 +79,34 @@ function planFrame(target, nat) {
     return { mode: 'cover', left, top, right: left + fw, bottom: top + fh };
 }
 
+/* ── Рівні якості ──────────────────────────────────────────────────────────── */
+
+/**
+ * Канонічна драбина рівнів за зростанням витрат. `auto` поза нею свідомо: це не
+ * рівень, а «вирішить провайдер».
+ *
+ * ⚠️ ЯКІ РІВНІ ІСНУЮТЬ — вирішує МОДЕЛЬ (caps.qualities), не панель. `xhigh` і
+ * `max` приймає лише gpt-image-2.5; для gpt-image-1 це HTTP 400 замість картинки.
+ */
+const QUALITY_LADDER = ['low', 'medium', 'high', 'xhigh', 'max'];
+
+/**
+ * Зводить збережений рівень до того, що приймає поточна модель.
+ *
+ * ⚠️ ЗАВЖДИ ВНИЗ. Якщо на gpt-image-2.5 обрано `max`, а користувач перемкнувся
+ * на gpt-image-1, беремо `high` — найвищий доступний, але не вищий за бажаний.
+ * Підняти рівень означало б мовчки збільшити рахунок за чужим рішенням.
+ */
+function coerceQuality(saved, allowed) {
+    const list = (Array.isArray(allowed) && allowed.length)
+        ? allowed : QUALITY_LADDER.concat('auto');
+    if (list.includes(saved)) return saved;
+    for (let i = QUALITY_LADDER.indexOf(saved); i >= 0; i--) {
+        if (list.includes(QUALITY_LADDER[i])) return QUALITY_LADDER[i];
+    }
+    return list.includes('auto') ? 'auto' : list[0];
+}
+
 /* ── Розмір запиту до провайдера ───────────────────────────────────────────── */
 
 /**
@@ -90,7 +118,14 @@ function planFrame(target, nat) {
 const QUALITY_BUDGET = {
     low:    1_200_000,   // ≈1.2 MP — дешево, вистачає для дрібних правок
     medium: 3_000_000,   // ≈3 MP
-    high:   8_294_400,   // максимум gpt-image-2 (3840×2160)
+    high:   8_294_400,   // максимум gpt-image-2/2.5 (8 294 400 px)
+    // ⚠️ xhigh і max НЕ дають більше пікселів: 'high' уже впирається в maxPx
+    // самої моделі. У gpt-image-2.5 ці рівні купують більше зусиль рендера на
+    // тій самій роздільності, і платимо ми вихідними токенами, а не площею.
+    // Через це картка плану показує для high/xhigh/max однакові мегапікселі —
+    // це правда, а не помилка розрахунку.
+    xhigh:  8_294_400,
+    max:    8_294_400,
     auto:   3_000_000,
 };
 
@@ -130,7 +165,7 @@ function exactSize(target, caps, quality = 'medium') {
     //
     // Чому не «увесь бюджет на high»: для виділення 40×40 це просило б
     // 2880×2880 = 8.29 MP, тобто гроші за пікселі, які одразу викидаються.
-    const AIM = { low: 1, medium: 2, high: 8, auto: 2 };
+    const AIM = { low: 1, medium: 2, high: 8, xhigh: 8, max: 8, auto: 2 };
     const aim = AIM[quality] ?? AIM.medium;
     const budget = Math.min(QUALITY_BUDGET[quality] ?? QUALITY_BUDGET.medium, maxPx);
     const wantPx = Math.max(minPx, Math.min(budget, target.w * target.h * aim));
@@ -219,7 +254,8 @@ function planRequest(caps, target, quality = 'medium') {
         // сходились погано: 1K = 1.05 MP, 2K = 4.19 MP, а бюджети 1.2 / 3 / 8.29 MP —
         // тому low І medium давали однакове 1K, і повзунок був майже декоративним.
         // Рівні Gemini дискретні, тому й вибираємо їх позицією, а не арифметикою.
-        const idx = { low: 0, medium: 1, high: order.length - 1, auto: 1 };
+        const idx = { low: 0, medium: 1, high: order.length - 1,
+                      xhigh: order.length - 1, max: order.length - 1, auto: 1 };
         let i = Math.min(idx[quality] ?? 1, order.length - 1);
 
         // Але не просити безглуздо більше за саму область: для виділення 200×200
@@ -234,6 +270,8 @@ function planRequest(caps, target, quality = 'medium') {
 
 module.exports = {
     unwrap,
+    QUALITY_LADDER,
+    coerceQuality,
     integerTarget,
     insetBlendRadius,
     planFrame,

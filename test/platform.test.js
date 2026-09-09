@@ -8,13 +8,18 @@ const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'manifest.json'), 'u
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 const appInfo = require('../app-info.js');
 
+/* ⚠️ СПИСОК ВИВОДИТЬСЯ З ФАЙЛОВОЇ СИСТЕМИ, А НЕ ПИШЕТЬСЯ РУКАМИ.
+   Раніше це був літерал — і новий модуль просто не існував для жодної з
+   перевірок нижче: ні для «нема абсолютних шляхів», ні для «місток лише в
+   одному модулі», ні (найгірше) для «білд не забув жодного файлу». Тобто
+   можна було додати модуль, зібрати реліз без нього й отримати зелені тести
+   при непрацездатному ZIP. Тепер новий файл автоматично потрапляє під усі
+   гейти, а білд доводиться оновити — бо інакше тест впаде. */
 const runtimeFiles = [
-    'app-info.js', 'auth.js', 'cache.js', 'capture.js', 'geometry.js', 'history.js',
-    'i18n.js', 'layer-tree.js', 'main.js', 'place.js', 'png.js', 'presets.js',
-    'public-ui.js', 'usage.js',
-    'providers/curl-transport.js', 'providers/google.js', 'providers/http.js',
-    'providers/index.js', 'providers/openai.js',
-];
+    ...fs.readdirSync(ROOT).filter(f => f.endsWith('.js')),
+    ...fs.readdirSync(path.join(ROOT, 'providers'))
+        .filter(f => f.endsWith('.js')).map(f => `providers/${f}`),
+].sort();
 
 // Єдиний файл, якому нативні шляхи потрібні по суті задачі: щоб зібрати команду
 // для системної оболонки. Файли створює сам UXP у своїй тимчасовій папці, тому
@@ -94,14 +99,60 @@ test('a request mask is never paired with a non-PNG input', () => {
     const png = fs.readFileSync(path.join(ROOT, 'png.js'), 'utf8');
 
     // рішення про маску мусить ухвалюватись ДО захоплення й керувати форматом
-    assert.match(main, /const wantMask = /);
     assert.match(main, /captureRegion\(ctx, s\.layerOnly, s\.lossless, wantMask\)/);
-    // останній рубіж: невідповідний формат знімає маску, а не їде мовчки далі
-    assert.match(main, /cap\.blob\.type !== 'image\/png'[\s\S]{0,240}maskBlob = null/);
-    // поріг швидкості не має права деградувати формат, коли PNG обов'язковий
-    assert.match(capture, /requirePng[\s\S]{0,400}viaDuplicateOnly = true/);
+    /* ⚠️ І воно мусить лишатись в ОДНОМУ місці. Доки формула жила двічі —
+       окремо в картці плану, окремо в capturePayload — вони розійшлись, і
+       картка обіцяла JPEG там, де летів PNG (виміряно в хості 2026-09-09).
+       Гейт саме на кількість збігів: другий рядок із цією формулою і є рецидив. */
+    assert.equal((main.match(/provider\.supportsMask && s\.padPercent > 0/g) || []).length, 1,
+        'формула wantMask мусить існувати рівно один раз — у inputPlan');
+    assert.match(main, /function inputPlan\(s, provider, ctx\)/);
+    assert.match(main, /const \{ wantMask \} = inputPlan\(s, provider, ctx\);/,
+        'capturePayload бере рішення з inputPlan');
+    assert.match(main, /const io = inputPlan\(s, provider, ctx\);/,
+        'картка плану бере рішення з того самого inputPlan');
+    // Останній рубіж переїхав у capture.maskForRequest — там він перевіряється
+    // поведінкою (test/mask-blend.test.js), а не текстом. Тут лишається гейт на
+    // те, що main.js не будує маску повз цю функцію.
+    assert.match(capture, /input\.type !== 'image\/png'[\s\S]{0,200}reason:/);
+    assert.match(main, /capture\.maskForRequest\(/);
+    assert.doesNotMatch(main, /buildRectMaskPng\(/,
+        'маску будує лише capture.maskForRequest — інакше інваріант обходиться');
+    // Поріг швидкості не має права деградувати ФОРМАТ — лише перемикати
+    // виконавця. `lossless` тому const: жоден рядок нижче не може тихо
+    // переписати його на JPEG ні коли PNG обов'язковий через маску, ні коли
+    // користувач просто поставив галку «вхід без втрат».
+    assert.match(capture, /const lossless = wantLossless \|\| requirePng;/);
+    assert.doesNotMatch(capture, /\blossless = false\b/,
+        'поріг не має права скасовувати вибір формату');
+    assert.match(capture, /const viaDuplicateOnly = lossless && w \* h > LOSSLESS_MAX_PX;/);
     // маска — RGBA (тип 6), як у прикладі документації
     assert.match(png, /encodePng\(px, width, height, 4\)/);
+});
+
+test('кожне поле вводу оголошує maxlength — інакше UXP мовчки глушить його на ~256 символах', () => {
+    // Виміряно в хості, не виведено з документації: поле UXP без ЯВНОГО
+    // maxlength приблизно на 256 символах просто перестає приймати введення.
+    // Ні помилки, ні обрізаного хвоста, ні події — промпт мовчки виявлявся
+    // коротшим за написаний. Adobe цього ніде не документує, тож єдиний захист
+    // від повернення бага — цей гейт.
+    for (const file of ['index.html', 'test/ui-harness.html']) {
+        const html = fs.readFileSync(path.join(ROOT, file), 'utf8');
+        const tags = html.match(/<(?:textarea|sp-textfield)\b[^>]*>/g) || [];
+        assert.ok(tags.length, `${file}: полів вводу не знайдено — тест утратив предмет`);
+        for (const tag of tags) {
+            assert.match(tag, /\smaxlength="\d+"/,
+                `${file}: поле без maxlength → ${tag.slice(0, 70)}`);
+        }
+        // rows= в UXP не діє взагалі (офіційний перелік відомих проблем):
+        // висоту задає лише CSS, а атрибут у розмітці вводив би в оману
+        assert.doesNotMatch(html, /<textarea[^>]*\srows=/, `${file}: rows у UXP нічого не робить`);
+    }
+    // нову межу видно користувачеві, а не лише коду
+    const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
+    assert.match(main, /function updateCharCount\(/);
+    assert.match(main, /updateCharCount\('prompt-input', 'prompt-count'\)/);
+    assert.match(fs.readFileSync(path.join(ROOT, 'style.css'), 'utf8'), /\.char-count\s*\{/);
 });
 
 test('local requires resolve with exact filename case', () => {
@@ -165,8 +216,10 @@ test('critical panel controls use deterministic UXP-safe markup', () => {
 
 test('macOS development deploy excludes non-runtime content', () => {
     const sh = fs.readFileSync(path.join(ROOT, 'deploy.sh'), 'utf8');
+    // docs/ — це сайт проєкту з демо-відео на ~1 МБ. Photoshop сканує Plug-ins
+    // при кожному старті, тому все, що не є рантаймом, туди не їде.
     for (const nonRuntime of ['INSTALL.txt', 'README.md', 'README.uk.md', 'package.json',
-                              'LICENSE', 'PRIVACY.md', '.github', 'scripts', 'dist']) {
+                              'LICENSE', 'PRIVACY.md', '.github', 'scripts', 'dist', 'docs']) {
         assert.match(sh, new RegExp(`--exclude '${nonRuntime.replace('.', '\\.')}'`));
     }
     assert.match(sh, /Plugins → ExactFill/);
@@ -174,6 +227,17 @@ test('macOS development deploy excludes non-runtime content', () => {
     assert.match(sh, /--include 'icons\/panel-\*\.png'/);
     assert.match(sh, /--exclude 'icons\/\*'/);
     assert.match(sh, /--exclude 'verify-assumptions\.psjs'/);
+});
+
+test('deploy target matches the installed plugin folder', () => {
+    // Скрипт довго вказував на AiImagePS — назву з часів до перейменування.
+    // Photoshop від цього не падає, і саме тому баг жив: замість оновити робочу
+    // папку деплой мовчки створював поруч ДРУГУ копію з тим самим manifest id.
+    const sh = fs.readFileSync(path.join(ROOT, 'deploy.sh'), 'utf8');
+    const dest = sh.match(/^DEST="([^"]+)"/m);
+    assert.ok(dest, 'deploy.sh має оголошувати DEST');
+    assert.equal(dest[1].split('/').pop(), manifest.name,
+        'папка призначення мусить збігатися з manifest.name');
 });
 
 test('one universal guide documents manual installation on both platforms', () => {
@@ -219,4 +283,24 @@ test('public demo ships a lightweight accessible comparison and real video', () 
 test('GitHub Sponsor button points to the ExactFill Ko-fi page', () => {
     const funding = fs.readFileSync(path.join(ROOT, '.github', 'FUNDING.yml'), 'utf8');
     assert.equal(funding.trim(), 'ko_fi: havryil89140');
+});
+
+test('сегментний перемикач якості кладе шість рівнів у два ряди по три', () => {
+    /* ⚠️ ВИМІРЯНО В ХОСТІ, НЕ В БРАУЗЕРІ. У браузерному стенді flex-basis
+       33.333 % давав рівно три кнопки в ряду. У Photoshop 27.5.0 ті самі три
+       переповнювали рядок на кілька пікселів і лягали ПО ДВІ — три ряди замість
+       двох. Причина: у .seg-btn немає box-sizing: border-box (глобального
+       правила у файлі теж немає), тому border-right: 1px додається до базису.
+
+       Гейт на обидві половини причини: box-sizing і базис із запасом. */
+    const css = fs.readFileSync(path.join(ROOT, 'style.css'), 'utf8');
+    const segBtn = css.slice(css.indexOf('.seg-btn {'), css.indexOf('.seg-btn:last-child'));
+    assert.match(segBtn, /box-sizing:\s*border-box/,
+        'border-right інакше додається до flex-basis');
+
+    const basis = css.match(/\.seg-wrap \.seg-btn \{[^}]*flex:\s*1\s+1\s+([\d.]+)%/);
+    assert.ok(basis, 'flex-basis рядів мусить лишатись у відсотках, щоб не залежати від ширини');
+    const pct = Number(basis[1]);
+    assert.ok(pct * 3 <= 100 && pct * 4 > 100,
+        `базис ${pct}%: три кнопки мусять влазити (${pct * 3}% ≤ 100), а четверта — ні (${pct * 4}% > 100)`);
 });
