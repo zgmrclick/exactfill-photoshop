@@ -27,7 +27,7 @@ const { batchPlay } = require('photoshop').action;
 const uxpStorage = require('uxp').storage;
 
 const { withPixels } = require('./place.js');
-const { buildRectMaskPng, encodePng } = require('./png.js');
+const { buildRectMaskPng, buildShapeMaskPng, encodePng } = require('./png.js');
 const { isolateLayerTree } = require('./layer-tree.js');
 const captureI18n = require('./i18n.js');
 
@@ -297,21 +297,81 @@ async function captureRegion(bounds, useLayerOnly = false, wantLossless = true,
  * @returns {{blob: Blob|null, bytes: number, reason: string}} reason непорожній
  *          рівно тоді, коли маски не буде
  */
-function maskForRequest({ ctx, target, feather = 0, input }) {
-    if (!input) return { blob: null, bytes: 0, reason: 'входу нема — маска ні до чого' };
-    if (input.type !== 'image/png') {
-        return { blob: null, bytes: 0,
-                 reason: `вхід ${input.type}, а не PNG: OpenAI вимагає однаковий формат входу й маски` };
+/**
+ * Форма активного виділення в пікселях кадру ctx: 255 = «змінити тут».
+ * Викликати ВСЕРЕДИНІ core.executeAsModal.
+ *
+ * ⚠️ ЧОМУ ЦЕ МОЖЕ ПОВЕРНУТИ null І ЧОМУ ЦЕ НОРМАЛЬНО. `imaging.getSelection`
+ * у CMYK-документі валить Photoshop (той самий SIGSEGV, що й getPixels —
+ * див. коментар про imaging вгорі файлу), тому поза RGB/Grayscale/Lab ми до
+ * нього не торкаємось узагалі. Немає форми — маска буде прямокутна, тобто
+ * рівно та поведінка, що була до 2026-09-09. Деградація, не поломка.
+ *
+ * @returns {Promise<{data: Uint8Array|null, reason: string}>}
+ */
+async function selectionShape(ctx, target, docMode) {
+    if (!isSafeMode(docMode)) {
+        return { data: null, reason: `${docMode}: getSelection поза RGB/Grayscale/Lab не чіпаємо` };
     }
+    let res = null;
     try {
-        const png = buildRectMaskPng(ctx.w, ctx.h, {
-            left: target.left - ctx.left, top: target.top - ctx.top,
-            right: target.right - ctx.left, bottom: target.bottom - ctx.top,
-        }, feather);
-        return { blob: new Blob([png], { type: 'image/png' }), bytes: png.length, reason: '' };
+        res = await imaging.getSelection({ documentID: app.activeDocument.id });
+        const d = res.imageData;
+
+        /* ⚠️ sourceBounds У getSelection НЕ ПРАЦЮЄ ЯК КАДРУВАННЯ (виміряно в
+           PS 27.5, 2026-09-09): попросили кадр ctx 1920×391 — повернувся
+           растр 1920×340, тобто рівно рамка самого виділення. Тому кадр
+           складаємо самі: беремо, що дали, і кладемо у ctx за зсувом. */
+        const box = res.sourceBounds || target;
+        const bw = box.right - box.left, bh = box.bottom - box.top;
+        if (d.width !== bw || d.height !== bh) {
+            return { data: null, reason: `віддав ${d.width}×${d.height}, а рамка ${bw}×${bh}` };
+        }
+
+        const raw = await d.getData();
+        const comps = d.components || 1;
+        const out = new Uint8Array(ctx.w * ctx.h);   // 0 = «зберегти», поза виділенням
+        const dx = box.left - ctx.left, dy = box.top - ctx.top;
+        for (let y = 0; y < d.height; y++) {
+            const ty = y + dy;
+            if (ty < 0 || ty >= ctx.h) continue;
+            for (let x = 0; x < d.width; x++) {
+                const tx = x + dx;
+                if (tx < 0 || tx >= ctx.w) continue;
+                out[ty * ctx.w + tx] = raw[(y * d.width + x) * comps];
+            }
+        }
+        return { data: out, reason: '' };
     } catch (e) {
-        return { blob: null, bytes: 0, reason: `маска не побудована: ${e.message}` };
+        return { data: null, reason: `getSelection: ${e.message}` };
+    } finally {
+        if (res && res.imageData) { try { res.imageData.dispose(); } catch (e) {} }
     }
 }
 
-module.exports = { captureRegion, buildRectMaskPng, maskForRequest, isSafeMode, LOSSLESS_MAX_PX };
+function maskForRequest({ ctx, target, feather = 0, input, shape = null }) {
+    if (!input) return { blob: null, bytes: 0, source: '', reason: 'входу нема — маска ні до чого' };
+    if (input.type !== 'image/png') {
+        return { blob: null, bytes: 0, source: '',
+                 reason: `вхід ${input.type}, а не PNG: OpenAI вимагає однаковий формат входу й маски` };
+    }
+    /* Форма справжнього виділення краща за його рамку: все, що ділить із ціллю
+       bounding box, лишається для моделі КОНТЕКСТОМ, а не дозволом малювати. */
+    try {
+        const png = shape
+            ? buildShapeMaskPng(ctx.w, ctx.h, shape, feather)
+            : buildRectMaskPng(ctx.w, ctx.h, {
+                left: target.left - ctx.left, top: target.top - ctx.top,
+                right: target.right - ctx.left, bottom: target.bottom - ctx.top,
+            }, feather);
+        return {
+            blob: new Blob([png], { type: 'image/png' }), bytes: png.length,
+            source: shape ? 'selection' : 'rectangle', reason: '',
+        };
+    } catch (e) {
+        return { blob: null, bytes: 0, source: '', reason: `маска не побудована: ${e.message}` };
+    }
+}
+
+module.exports = { captureRegion, buildRectMaskPng, maskForRequest, selectionShape,
+                   isSafeMode, LOSSLESS_MAX_PX };

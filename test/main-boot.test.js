@@ -189,3 +189,66 @@ test('«Перегенерувати» бере відступ контекст�
     assert.doesNotMatch(branch, /ctx: lastRun\.ctx/,
         'збережений ctx у гілці reuse — це і є той самий баг');
 });
+
+test('відступ контексту рахується по кожній осі окремо', async () => {
+    await booted;
+    /* ⚠️ Раніше відступ брався від ДОВШОЇ сторони й додавався до всіх чотирьох
+       боків. На виділенні 1011×423 «15%» давало 152 px усюди: +30% ширини, але
+       +72% висоти, ще й асиметрично після зажиму об верх канви — виміряно в
+       хості 2026-09-09 як ctx 1315×611. Правильно: 1315×522. */
+    doc.getElementById('lossless-input').checked = false;
+    await withSelection(15);
+    assert.match(planLine(), /контекст 1315×522/,
+        `очікував padX=152, padY=63; отримав: ${planLine()}`);
+});
+
+test('картка плану називає ціну ще до натискання', async () => {
+    await booted;
+    /* Модель і рівень задаємо явно: попередні тести в цьому файлі перемикають
+       пікер, а прогноз залежить саме від пари (модель, якість). */
+    global.localStorage.setItem('ai_model', 'gpt-image-2.5-sunburst');
+    global.localStorage.setItem('ai_quality', 'high');
+    doc.getElementById('lossless-input').checked = false;
+    await withSelection(0);
+    /* Прогноз для sunburst/high — медіана 3912 вихідних токенів із журналу,
+       тобто ≈$0.13. Точне число перевіряє usage.test.js; тут важливо, що воно
+       ВЗАГАЛІ доїжджає до картки: до цієї правки ціна була відома лише
+       постфактум, коли платити вже пізно. */
+    assert.match(planLine(), /≈\$0\.1\d/, `ціни в картці нема: ${planLine()}`);
+    assert.match(planLine(), /\(\$0\.\d+–\$0\.\d+\)/, 'вилка мусить бути видима — це оцінка, не тариф');
+});
+
+test('картка попереджає про жорсткий край, коли з маскою йде край 0', async () => {
+    await booted;
+    const feather = doc.getElementById('edge-feather');
+    feather.value = '0';
+    await withSelection(15);
+    assert.match(planLine(), /з маскою/);
+    assert.match(planLine(), /жорсткий край/, `попередження нема: ${planLine()}`);
+
+    feather.value = '16';
+    await withSelection(15);
+    assert.doesNotMatch(planLine(), /жорсткий край/, 'з ненульовим краєм попередження зайве');
+});
+
+test('кнопка «Уточнити» існує і на чистому старті сіра', async () => {
+    await booted;
+    const refine = doc.getElementById('refine-btn');
+    assert.ok(refine, 'кнопка мусить бути в розмітці, а не з’являтись після першого запуску');
+    /* ⚠️ Три умови вмикають її, і кожна вміє відмовити окремо: був запуск,
+       від нього щось лишилось, провайдер уміє маршрут. На чистому старті
+       не виконана перша — і саме це має бачити користувач, бо натиснута
+       кнопка без lastRun пішла б у мережу з порожнім посиланням. */
+    assert.equal(refine.disabled, true);
+    assert.equal(refine.getAttribute('data-i18n'), 'action.refine');
+});
+
+test('поруч із «Уточнити» лишається «Перегенерувати» — це різні дії', async () => {
+    await booted;
+    // Одну кнопку легко переплутати з іншою, доки видно лише одну з них.
+    // «Перегенерувати» — той самий промпт по вихідних пікселях; «Уточнити» —
+    // новий текст по вже намальованому кадру. Обидві мусять бути на очах.
+    const regen = doc.getElementById('regen-btn');
+    assert.ok(regen && regen.disabled === true);
+    assert.notEqual(doc.getElementById('refine-btn'), regen);
+});

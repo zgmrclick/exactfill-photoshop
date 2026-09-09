@@ -3,7 +3,9 @@
  *
  *  Викинуто проти старого openAiSdk.js:
  *    • generateImageWithContext + увесь шлях /v1/responses — імпортувався, але
- *      не викликався НІДЕ (rg давав одне попадання — сам import)
+ *      не викликався НІДЕ (rg давав одне попадання — сам import). Повернувся
+ *      2026-09-09 як `refine` — уже з викликом і з єдиною причиною існувати:
+ *      пам'ять про попередній кадр, якої images/edits не має принципово.
  *    • refinePrompt, generateChat — мертві фічі, які користувач не використовує
  *    • OPENAI_IMAGE2_SIZES / OPENAI_IMAGE1_SIZES — декларації, що нічого
  *      не валідували; тепер обмеження живуть у caps і споживаються geometry.js
@@ -20,6 +22,20 @@ const openAiI18n = require('../i18n.js');
 
 const BASE = 'https://api.openai.com/v1/';
 const PARTIAL_IMAGES = 3;
+
+/**
+ * Формат відповіді. НЕ налаштування — несуча конструкція.
+ *
+ * ⚠️ Точна вставка тримається на тому, що place.js вписує в отриманий файл
+ * чанк pHYs (png.setPngResolution) з роздільністю документа: без нього
+ * placeEvent вважає растр 72 ppi і Smart Object приїжджає іншого розміру.
+ *   • WebP поля роздільності НЕ МАЄ ВЗАГАЛІ — там цієї опори не існує;
+ *   • JPEG має JFIF density, але це окремий записувач плюс парсер SOF замість
+ *     readPngSize, тобто другий формат наскрізь: place.js, кеш, прев'ю.
+ * Тому webp/jpeg тут не «ще одне значення в списку», а окрема робота. Поки її
+ * нема — формат один, і гейт у test/platform.test.js стереже цю зв'язку.
+ */
+const OUTPUT_FORMAT = 'png';
 
 /* ── Можливості моделей ────────────────────────────────────────────────────── *
  * ⚠️ caps — ЄДИНА декларація того, що модель уміє. Її читають geometry.js
@@ -212,7 +228,7 @@ async function editImage({ apiKey, model, prompt, imageBlob, maskBlob, reference
     const fields = [
         { name: 'model',  data: model },
         { name: 'prompt', data: prompt },
-        { name: 'output_format', data: 'png' },
+        { name: 'output_format', data: OUTPUT_FORMAT },
     ];
 
     const imgs = [imageBlob].concat(references || []).filter(Boolean);
@@ -261,9 +277,170 @@ async function editImage({ apiKey, model, prompt, imageBlob, maskBlob, reference
     return { images: extractImages(json, 1), usage: json.usage || null };
 }
 
+/* ── Уточнення: /v1/responses з інструментом image_generation ──────────────── *
+ * ⚠️ НЕ заміна images/edits, а доповнення. Головний шлях лишається головним: він
+ * знає наші моделі поіменно, розширені рівні якості (xhigh/max) і дає usage, з
+ * якого рахується точна ціна. Responses додає рівно одне, чого images/edits не
+ * вміє принципово — ПАМ'ЯТЬ ПРО ПОПЕРЕДНІЙ КАДР: «а тепер тінь м'якшу» модель
+ * тлумачить відносно власного минулого наміру, а не з голих пікселів.
+ *
+ * Ланцюг починається ліниво, і це навмисно: звичайна генерація не змінює
+ * маршрут і не змінює ціну. Перше «Уточнити» відкриває розмову вже готовим
+ * результатом як input_image — data-URI, повз Files API. Маска тут не потрібна:
+ * уточнюємо цілу згенеровану плитку, а до документа вона повертається крізь ту
+ * саму маску шару, що й завжди. З другого ходу передаємо лише id виклику.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Модель-господар: image_generation — інструмент, а не модель, і /v1/responses
+ * вимагає в полі `model` саме чат-модель. Це протокольна константа, як BASE.
+ */
+const RESPONSES_HOST = 'gpt-5.6';
+
+/**
+ * Поля інструмента. `model` задокументовано не було, тому воно тут опційне:
+ * див. rejectsToolModel — перевіряємо на живому API, а не здогадкою.
+ */
+function refineTool({ plan, model, withModel, partials }) {
+    // Формат просимо явно: у Responses він за замовчуванням не png, а вставка
+    // без pHYs розсипається — див. OUTPUT_FORMAT.
+    const tool = { type: 'image_generation', output_format: OUTPUT_FORMAT };
+    if (withModel) tool.model = model;
+    if (plan && plan.size) tool.size = plan.size;
+    if (plan && plan.quality && plan.quality !== 'auto') tool.quality = plan.quality;
+    if (partials) tool.partial_images = PARTIAL_IMAGES;
+    return tool;
+}
+
+/**
+ * ⚠️ ХІД ≥2 ЙДЕ previous_response_id, А НЕ ЗІБРАНИМ РУКАМИ input — І ЦЕ ВИМІР,
+ * А НЕ СМАК. Приклад із документації подає назад сам `image_generation_call`
+ * за id. З міркувальною моделлю-господарем це 400 (виміряно 2026-09-09):
+ *   Item 'ig_…' of type 'image_generation_call' was provided without its
+ *   required 'reasoning' item: 'rs_…'
+ * Вихідні елементи утворюють граф (reasoning → image_generation_call), і вузол
+ * не можна вставити назад без батька. previous_response_id для того й існує:
+ * ланцюг тягне сервер, а клієнт не моделює чужу структуру.
+ */
+function refineInput({ prompt, previousResponseId, previousImage }) {
+    const content = [{ type: 'input_text', text: prompt }];
+    if (!previousResponseId) {
+        // Перший хід: посилатись нема на що, тому даємо пікселі попереднього
+        // результату — саме вони і є предметом уточнення.
+        content.push({
+            type: 'input_image',
+            image_url: `data:image/png;base64,${previousImage}`,
+            detail: 'auto',
+        });
+    }
+    return [{ role: 'user', content }];
+}
+
+/**
+ * Витягує картинку й id відповіді. responseId критичний: без нього наступне
+ * «Уточнити» почне ланцюг спочатку й розмова втратить пам'ять. callId лишається
+ * заради логу — за ним видно, що інструмент справді малював.
+ */
+function extractResponseImage(json) {
+    const output = json && Array.isArray(json.output) ? json.output : [];
+    const call = output.find(o => o && o.type === 'image_generation_call'
+                                && typeof o.result === 'string' && o.result);
+    if (!call) {
+        // Модель могла відповісти текстом замість картинки — показуємо цей
+        // текст, бо саме він пояснює відмову.
+        const said = output
+            .filter(o => o && o.type === 'message')
+            .flatMap(o => (o.content || []).map(c => c && c.text).filter(Boolean))
+            .join(' ').slice(0, 300);
+        throw new HttpError(0, openAiI18n.t('provider.openaiNoImages', { refusal: said }));
+    }
+    return {
+        images: [call.result],
+        responseId: json.id || null,
+        callId: call.id || null,
+        usage: json.usage || null,
+    };
+}
+
+/** SSE Responses має власні імена подій — форма b64 інша, ніж у images/*. */
+async function readResponsesStream({ url, headers, body, signal, onPartial }) {
+    let done = null;
+    const last = await requestStream(url, { method: 'POST', headers, body, signal }, ev => {
+        if (!ev || !ev.type) return;
+        if (ev.type === 'response.image_generation_call.partial_image' && ev.partial_image_b64) {
+            onPartial(ev.partial_image_b64, ev.partial_image_index);
+        } else if (ev.type === 'response.completed' && ev.response) {
+            done = ev.response;
+        } else if (ev.type === 'error' || ev.error) {
+            throw new HttpError(0, ev.error?.message || openAiI18n.t('provider.openaiStreamError'));
+        }
+    });
+    const fin = done || (last && last.response);
+    if (!fin) throw new HttpError(0, openAiI18n.t('provider.openaiStreamIncomplete'));
+    return extractResponseImage(fin);
+}
+
+/**
+ * Відмова саме через поле `model` в інструменті — єдиний випадок, коли є що
+ * зробити далі. Формулювання навмисно вузьке: «model not found» для
+ * моделі-господаря сюди потрапити НЕ повинно, інакше ми б мовчки підмінили
+ * зрозумілу помилку другим таким самим запитом.
+ */
+function rejectsToolModel(e) {
+    if (!e || e.status !== 400) return false;
+    const msg = String(e.message || '');
+    return /tools\[\d+\]\.model/.test(msg)
+        || (/unknown|unsupported|unrecognized|not permitted/i.test(msg) && /\bmodel\b/i.test(msg));
+}
+
+/**
+ * Уточнення попереднього результату.
+ * @returns {{images:string[], callId:string|null, usage:object|null}}
+ */
+async function refine({ apiKey, model, prompt, previousResponseId, previousImage,
+                        plan, signal, onPartial, onProgress }) {
+    if (!apiKey) throw new Error(openAiI18n.t('provider.noKey', { provider: 'OpenAI' }));
+    if (!prompt || !prompt.trim()) throw new Error(openAiI18n.t('provider.emptyPrompt'));
+    if (!previousResponseId && !previousImage) throw new Error(openAiI18n.t('provider.refineNoSource'));
+
+    const url = `${BASE}responses`;
+    const headers = { ...authHeader(apiKey), 'Content-Type': 'application/json' };
+    const input = refineInput({ prompt, previousResponseId, previousImage });
+
+    const send = withModel => {
+        const payload = {
+            model: RESPONSES_HOST,
+            input,
+            tools: [refineTool({ plan, model, withModel, partials: !!onPartial })],
+        };
+        if (previousResponseId) payload.previous_response_id = previousResponseId;
+        if (onPartial) payload.stream = true;
+        const body = JSON.stringify(payload);
+        return onPartial
+            ? readResponsesStream({ url, headers, body, signal, onPartial })
+            : request(url, { method: 'POST', headers, body, signal }).then(extractResponseImage);
+    };
+
+    if (onProgress) onProgress(openAiI18n.t('provider.refining'));
+    // Без цього рядка неможливо відрізнити перший хід від продовження розмови.
+    console.log(`[openai] responses/${RESPONSES_HOST} + image_generation, ` +
+                (previousResponseId ? `продовження (${previousResponseId})` : 'перший хід (з пікселями)'));
+
+    let res;
+    try {
+        res = await withRetry(() => send(true), { signal });
+    } catch (e) {
+        if (!rejectsToolModel(e)) throw explainModelError(e, model);
+        console.warn('[openai] інструмент не приймає model — уточнюю моделлю API за замовчуванням');
+        res = await withRetry(() => send(false), { signal });
+    }
+    if (onProgress) onProgress(openAiI18n.t('provider.done'));
+    return res;
+}
+
 /** Генерація з нуля — коли пікселі свідомо ігноруються. */
 async function generateFresh({ apiKey, model, prompt, plan, background, signal, onPartial }) {
-    const payload = { model, prompt, n: 1, output_format: 'png' };
+    const payload = { model, prompt, n: 1, output_format: OUTPUT_FORMAT };
     if (plan.size) payload.size = plan.size;
     if (plan.quality && plan.quality !== 'auto') payload.quality = plan.quality;
     if (background) payload.background = background;
@@ -342,9 +519,18 @@ module.exports = {
     supportsReferences: true,
     supportsTransparent: true,
     supportsStream: true,
+    // Розмова про попередній кадр — лише в /v1/responses, і лише тут.
+    supportsRefine: true,
     keyPage: 'https://platform.openai.com/api-keys',
     models,
     explainModelError,
     capsFor,
     generate,
+    refine,
+    RESPONSES_HOST,
+    OUTPUT_FORMAT,
+    /* Чисті частини маршруту уточнення, відкриті рівно заради тестів: зібрати
+       тіло запиту й розібрати відповідь можна без мережі, а саме у формі тіла
+       й ховаються помилки, які живий прогін показав би найдорожчим способом. */
+    _refineParts: { refineTool, refineInput, extractResponseImage, rejectsToolModel },
 };

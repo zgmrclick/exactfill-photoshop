@@ -76,6 +76,51 @@ const GOOGLE = {
     },
 };
 
+/**
+ * Типові токени за парою (модель, рівень якості) — насіння прогнозу ціни.
+ *
+ * ⚠️ ЦЕ ВИМІР, А НЕ ТАРИФ. Медіани з 80 справжніх запитів у журналі
+ * (2026-08-11…2026-09-09). Головне, що показала вибірка: вихідні токени
+ * визначає РІВЕНЬ ЯКОСТІ, а не площа запиту. Кореляція з мегапікселями
+ * всередині одного рівня — лише +0.28…+0.58 при розкиді ±40%, тому
+ * коефіцієнт «токенів на мегапіксель» був би вигаданою точністю.
+ *
+ * Вхідні токени тримаємо окремо для кожного рівня НАВМИСНО: на `low`
+ * плагін шле дрібний кадр (медіана 373), на `high` — великий (1556), і
+ * спільна константа помилялась на `low` удвічі.
+ *
+ *   модель                 рівень   in     out     справжня медіана ціни
+ *   gpt-image-2            low      373    141     $0.0074  (n=15)
+ *   gpt-image-2            medium   1512   1932    $0.0682  (n=34)
+ *   gpt-image-2            high     1556   16399   $0.5023  (n=25)
+ *   gpt-image-2.5-sunburst high     1522   3912    $0.1299  (n=3)
+ *   gpt-image-2.5-sunburst max      685    7062    $0.2172  (n=2)
+ *   gpt-image-2.5-flare    high     1522   3912    $0.1293  (n=1)
+ *
+ * Рядки 2.5 стоять на кількох спостереженнях — прогноз для них навмисно
+ * подається як приблизний, а не як точна сума.
+ */
+const SEED_TOKENS = {
+    'gpt-image-2': {
+        low:    { in: 373,  out: 141 },
+        medium: { in: 1512, out: 1932 },
+        high:   { in: 1556, out: 16399 },
+    },
+    'gpt-image-2.5-sunburst': {
+        high: { in: 1522, out: 3912 },
+        max:  { in: 685,  out: 7062 },
+    },
+    'gpt-image-2.5-flare': {
+        high: { in: 1522, out: 3912 },
+    },
+};
+
+/** Спостережений розкид усередині рівня — показуємо вилку, а не одну цифру. */
+const FORECAST_SPREAD = 0.4;
+
+/** Скільки власних запитів треба, щоб довіряти журналу користувача більше за насіння. */
+const MIN_OWN_SAMPLES = 3;
+
 const finite = value => {
     const n = Number(value);
     return Number.isFinite(n) && n >= 0 ? n : 0;
@@ -114,6 +159,96 @@ function fixedOpenAIOutput(price, quality, size, imageCount) {
     const [w, h] = String(size || '').split('x').map(Number);
     const shape = w && h && w === h ? 'square' : 'wide';
     return finite(price.flat[q][shape]) * Math.max(1, finite(imageCount));
+}
+
+/** Маршрут запиту в журналі. Записи давніших версій його не мають — вони edits. */
+const DEFAULT_ROUTE = 'edits';
+
+function median(values) {
+    const list = values.filter(Number.isFinite).sort((a, b) => a - b);
+    if (!list.length) return null;
+    const mid = list.length >> 1;
+    return list.length % 2 ? list[mid] : (list[mid - 1] + list[mid]) / 2;
+}
+
+/**
+ * Скільки токенів дав САМ користувач на цій парі модель+якість.
+ * @param {number} need — скільки спостережень достатньо. Порогів два навмисно:
+ *        щоб ПЕРЕБИТИ вимірене насіння, потрібно MIN_OWN_SAMPLES; а там, де
+ *        насіння нема взагалі (рідкісні рівні 2.5), одне спостереження вже
+ *        краще за порожню картку — інакше прогноз не з'явиться ніколи.
+ */
+function ownTokens(history, model, quality, need, route = DEFAULT_ROUTE) {
+    if (!Array.isArray(history)) return null;
+    const name = modelName(model);
+    /* ⚠️ Маршрут — частина ключа, а не подробиця. Уточнення через /v1/responses
+       тягне з собою розмову: у ньому інші вхідні токени й інша модель-господар.
+       Змішані в одну медіану з images/edits, вони псують обидві оцінки. Записи
+       без поля route — з версій до 2026-09-09 — це саме edits, тому дефолт такий. */
+    const mine = history.filter(e => e && modelName(e.model) === name && e.quality === quality
+                                  && (e.route || DEFAULT_ROUTE) === route
+                                  && Number(e.outputTokens) > 0);
+    if (mine.length < need) return null;
+    return {
+        in: median(mine.map(e => Number(e.inputTokens))) || 0,
+        out: median(mine.map(e => Number(e.outputTokens))),
+        samples: mine.length,
+        source: 'own',
+    };
+}
+
+/**
+ * Скільки цей запит ІМОВІРНО коштуватиме — до натискання кнопки.
+ *
+ * ⚠️ Навіщо окремо від estimateCost: та рахує ФАКТ і вимагає `usage` з
+ * відповіді. У gpt-image-2/2.5 немає таблиці «за картинку», тому до запиту
+ * факту взятися нізвідки — а саме там ціна й вирішує, натискати чи ні.
+ *
+ * Власний журнал користувача має пріоритет над вбудованим насінням: у нього
+ * свої сюжети й свої розміри виділень, і після MIN_OWN_SAMPLES запитів його
+ * медіана точніша за нашу. Панель через це самокалібрується, не ходячи в мережу.
+ *
+ * @param {object[]} [history] — записи журналу (ledger.load())
+ * @returns {{usd:number|null, low:number, high:number, method:string, samples:number}}
+ */
+function forecastOpenAI({ model, quality, plan, history }) {
+    const none = m => ({ usd: null, low: 0, high: 0, method: m, samples: 0 });
+    const price = OPENAI[modelName(model)];
+    if (!price) return none('unknown-model');
+
+    // Моделі з тарифом «за картинку» знають свою ціну точно — вилка не потрібна.
+    const flat = fixedOpenAIOutput(price, quality, plan?.size, 1);
+    if (flat !== null) {
+        const usd = perMillion(SEED_TOKENS[modelName(model)]?.[quality]?.in ?? 1500, price.imageIn) + flat;
+        return { usd, low: usd, high: usd, method: 'flat', samples: Infinity };
+    }
+
+    const seed = SEED_TOKENS[modelName(model)]?.[quality];
+    const picked = ownTokens(history, model, quality, seed ? MIN_OWN_SAMPLES : 1, DEFAULT_ROUTE)
+        || (seed ? { ...seed, samples: 0, source: 'seed' } : null);
+    if (!picked) return none('no-observations');
+
+    const input = perMillion(picked.in, price.imageIn);
+    const out = tokens => input + perMillion(tokens, price.imageOut);
+    return {
+        usd: out(picked.out),
+        low: out(picked.out * (1 - FORECAST_SPREAD)),
+        high: out(picked.out * (1 + FORECAST_SPREAD)),
+        method: picked.source === 'own' ? 'own-history' : 'seed-median',
+        samples: picked.samples,
+    };
+}
+
+/** Прогноз для будь-якого провайдера. Google має фіксовану ціну за картинку. */
+function forecastCost({ provider, model, quality, plan, history }) {
+    if (provider === 'openai') return forecastOpenAI({ model, quality, plan, history });
+    if (provider === 'google') {
+        const usd = estimateGoogle({ model, plan, usage: null, imageCount: 1 }).usd;
+        return usd === null
+            ? { usd: null, low: 0, high: 0, method: 'no-observations', samples: 0 }
+            : { usd, low: usd, high: usd, method: 'flat', samples: Infinity };
+    }
+    return { usd: null, low: 0, high: 0, method: 'unknown-provider', samples: 0 };
 }
 
 function estimateOpenAI({ model, quality, plan, usage, imageCount, hasImageInput }) {
@@ -195,6 +330,7 @@ function createEntry(meta, usage, now = Date.now()) {
         providerLabel: meta?.providerLabel || meta?.provider || '',
         model: modelName(meta?.model),
         quality: meta?.quality || meta?.plan?.quality || '',
+        route: meta?.route || DEFAULT_ROUTE,
         size: meta?.plan?.size || meta?.plan?.imageSize || '',
         aspectRatio: meta?.plan?.aspectRatio || '',
         imageCount: Math.max(1, finite(meta?.imageCount)),
@@ -262,7 +398,11 @@ function formatTokens(value) {
 module.exports = {
     PRICE_VERSION,
     MAX_ENTRIES,
+    SEED_TOKENS,
+    DEFAULT_ROUTE,
+    MIN_OWN_SAMPLES,
     estimateCost,
+    forecastCost,
     createEntry,
     prune,
     summarize,

@@ -288,6 +288,11 @@ sp-slider { width: 100%; }
 .gen-row { margin: 0; flex-wrap: nowrap; }
 #generate-btn { width: 100%; }
 .regen-btn { display: block; width: 100%; box-sizing: border-box; margin-top: 4px; }
+/* Дві вторинні кнопки поруч, але панель буває вузька: базис 110px змушує їх
+   перенестись у стовпчик замість того, щоб «Перегенерувати» стиснулось у три
+   літери з трикрапкою. */
+.regen-row { margin: 0; gap: 4px; }
+.regen-row .regen-btn { width: auto; flex: 1 1 110px; }
 .action-btn {
     display: inline-flex;
     align-items: center;

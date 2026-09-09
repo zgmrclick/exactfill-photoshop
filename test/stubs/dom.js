@@ -148,9 +148,21 @@ function buildFromHtml(html) {
         const [, tag, before, id, after] = m;
         const el = doc.createElement(tag);
         el.setAttribute('id', id);
-        for (const [, name, value] of `${before} ${after}`.matchAll(/([\w-]+)="([^"]*)"/g)) {
+        const raw = `${before} ${after}`;
+        for (const [, name, value] of raw.matchAll(/([\w-]+)="([^"]*)"/g)) {
             if (name !== 'id') el.setAttribute(name, value);
         }
+        /* ⚠️ Булеві атрибути пишуться БЕЗ значення (`disabled`, `checked`), тому
+           пара name="value" вище їх не бачить. Доки цього не було, кнопка, сіра
+           в розмітці, приїжджала в стенд активною — і тест «на старті сіра»
+           проходив би через поблажливість стенда, а не через код. */
+        for (const flag of ['disabled', 'checked', 'hidden', 'readonly']) {
+            if (!el.hasAttribute(flag) && new RegExp(`(^|\\s)${flag}(\\s|$)`).test(raw)) {
+                el.setAttribute(flag, '');
+            }
+        }
+        if (el.hasAttribute('disabled')) el.disabled = true;
+        if (el.hasAttribute('checked')) el.checked = true;
         if (el.hasAttribute('class')) el.className = el.getAttribute('class');
         if (tag === 'textarea' || tag.startsWith('sp-')) el.value = '';
         doc.appendChild(el);

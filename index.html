@@ -80,9 +80,14 @@
                         data-i18n="action.cancel">Cancel</button>
                 <div id="spinner" class="spinner hidden" aria-hidden="true"></div>
             </div>
-            <button id="regen-btn" type="button" class="action-btn secondary-btn regen-btn" disabled
-                title="Same prompt and area, without making a new selection"
-                data-i18n="action.regenerate" data-i18n-title="action.regenerateTitle">Regenerate</button>
+            <div class="row regen-row">
+                <button id="regen-btn" type="button" class="action-btn secondary-btn regen-btn grow" disabled
+                    title="Same prompt and area, without making a new selection"
+                    data-i18n="action.regenerate" data-i18n-title="action.regenerateTitle">Regenerate</button>
+                <button id="refine-btn" type="button" class="action-btn secondary-btn regen-btn grow" disabled
+                    title="Change the last result by describing what to fix"
+                    data-i18n="action.refine" data-i18n-title="action.refineTitle">Refine</button>
+            </div>
         </div>
 
         <div id="status-region" class="status-region" aria-live="polite">

@@ -79,11 +79,17 @@ async function readSelectionBounds(doc) {
 /** Розширює цільову область контекстом і зажимає канвою. */
 function expandForContext(target, doc, padPercent) {
     if (!padPercent) return { ...target };
-    const pad = Math.round(Math.max(target.w, target.h) * (padPercent / 100));
-    const left   = Math.max(0, target.left - pad);
-    const top    = Math.max(0, target.top - pad);
-    const right  = Math.min(doc.width, target.right + pad);
-    const bottom = Math.min(doc.height, target.bottom + pad);
+    /* ⚠️ Відсоток рахуємо ПО КОЖНІЙ ОСІ ОКРЕМО. Раніше тут був один відступ від
+       довшої сторони — і на смузі 1011×423 «15%» означало +30% ширини, але
+       +72% висоти, ще й асиметрично після зажиму об канву (виміряно 2026-09-09:
+       ctx 1315×611 замість очікуваних 1315×549). Користувач бачив у картці
+       вдвічі більший кадр, ніж просив, і платив за нього. */
+    const padX = Math.round(target.w * (padPercent / 100));
+    const padY = Math.round(target.h * (padPercent / 100));
+    const left   = Math.max(0, target.left - padX);
+    const top    = Math.max(0, target.top - padY);
+    const right  = Math.min(doc.width, target.right + padX);
+    const bottom = Math.min(doc.height, target.bottom + padY);
     return { left, top, right, bottom, w: right - left, h: bottom - top };
 }
 
@@ -106,6 +112,22 @@ function setBusy(on) {
     }
     const regen = $('regen-btn');
     if (regen) regen.disabled = on || !lastRun;
+    const refine = $('refine-btn');
+    // Уточнення потребує не лише минулого запуску, а й провайдера, який уміє
+    // розмову: у Gemini такого маршруту немає, і кнопка мусить це показувати.
+    if (refine) {
+        refine.disabled = on || !canRefine();
+        /* Хід розмови видно лише тут. Різниця між першим ходом (їдуть пікселі)
+           і продовженням (їде id) — це різна ціна й різна поведінка моделі,
+           тому вона мусить бути написана, а не вгадуватись. */
+        const turn = !canRefine() ? ''
+            : lastRun.responseId
+                ? mainI18n.t('plan.refineTurn', { number: (lastRun.turn || 1) + 1 })
+                : mainI18n.t('plan.refineFirst');
+        refine.setAttribute('title', turn
+            ? `${mainI18n.t('action.refineTitle')} — ${mainI18n.t('plan.refine', { turn })}`
+            : mainI18n.t('action.refineTitle'));
+    }
     const cancel = $('cancel-btn');
     if (cancel) cancel.classList.toggle('hidden', !on);
     const sp = $('spinner');
@@ -467,6 +489,30 @@ function setPlanCard(titleKey, body, ready) {
     card.classList.toggle('dim', !ready);
 }
 
+/**
+ * Рядок ціни для картки плану. Порожній, коли спостережень нема — вигадана
+ * цифра тут гірша за її відсутність: за нею ухвалюють рішення натискати.
+ */
+function forecastNote({ provider, model, quality, plan }) {
+    try {
+        const f = usageTracker.forecastCost({
+            provider: provider.id, model, quality, plan, history: ledger.load(),
+        });
+        if (f.usd === null) return '';
+        const usd = usageTracker.formatUsd(f.usd);
+        return f.low === f.high
+            ? ` · ${mainI18n.t('plan.cost', { usd })}`
+            : ` · ${mainI18n.t('plan.costRange', {
+                usd,
+                low: usageTracker.formatUsd(f.low),
+                high: usageTracker.formatUsd(f.high),
+            })}`;
+    } catch (e) {
+        console.warn('[ui] прогноз ціни не порахувався:', e.message);
+        return '';
+    }
+}
+
 async function refreshPlanLine() {
     const el = $('plan-line');
     if (!el) return;
@@ -510,9 +556,18 @@ async function refreshPlanLine() {
             ? ` · ${mainI18n.t('plan.inputNone')}`
             : ` · ${mainI18n.t(io.viaDuplicate ? 'plan.inputPngLarge'
                              : io.lossless ? 'plan.inputPng' : 'plan.inputJpeg')}`
-              + (io.wantMask ? ` · ${mainI18n.t('plan.withMask')}` : '');
+              /* Форма важить: за нею модель отримує сусідні пікселі як контекст,
+                 а не як дозвіл малювати. Обіцяємо її лише там, де справді
+                 зможемо прочитати — у CMYK getSelection не викликаємо взагалі. */
+              + (io.wantMask ? ` · ${mainI18n.t(
+                    !sel.solid && capture.isSafeMode(String(doc.mode))
+                        ? 'plan.withShapeMask' : 'plan.withMask')}` : '')
+              // Жорсткий край при масці — це видимий рубець на стику. Дефолт 16 px
+              // ставився не з естетики: див. коментар до buildRectMaskPng.
+              + (io.wantMask && !s.feather ? ` · ${mainI18n.t('plan.hardEdge')}` : '');
         setPlanCard('plan.readyTitle', mainI18n.t('plan.request', {
             what,
+            cost: forecastNote({ provider, model, quality: s.quality, plan }),
             input: inputNote,
             width: target.w,
             height: target.h,
@@ -763,10 +818,15 @@ async function insertImage(b64, ctx, target, feather) {
             const el = $('residual-text');
             if (el) {
                 const zero = [r.dx, r.dy, r.dw, r.dh].every(v => Math.abs(Number(v) || 0) < 0.01);
-                el.textContent = zero
+                /* ⚠️ Відкат на прямокутну маску був ЛИШЕ в консолі. А це саме той
+                   випадок, коли форма виділення переставала різати шар: усе, що
+                   ділить з ціллю bounding box, лишалось перемальованим. Мовчати
+                   про це не можна — користувач дивиться на результат, а не в лог. */
+                const fallback = haveChannel ? '' : ` · ${mainI18n.t('residual.rectMask')}`;
+                el.textContent = (zero
                     ? mainI18n.t('residual.exact')
-                    : mainI18n.t('residual.value', r);
-                el.className = 'residual' + (zero ? ' ok' : ' warn');
+                    : mainI18n.t('residual.value', r)) + fallback;
+                el.className = 'residual' + (zero && haveChannel ? ' ok' : ' warn');
             }
             console.log('[main] residual', JSON.stringify(report.residual),
                 report.warnings.length ? 'warnings: ' + report.warnings.join('; ') : '');
@@ -823,14 +883,16 @@ async function reinsert(cacheId) {
  * Передумови запуску. Кожна відмова — showAlert і null; тримати їх в onGenerate
  * означало б двадцять рядків guard-ів перед першою корисною дією.
  */
-async function collectRunInputs(reuse) {
+async function collectRunInputs(mode) {
     const doc = app.activeDocument;
     if (!doc) { await core.showAlert(mainI18n.t('alert.openDocument')); return null; }
 
     const model = localStorage.getItem(LS.model);
     if (!model) { await core.showAlert(mainI18n.t('alert.chooseModel')); return null; }
 
-    const prompt = reuse && lastRun ? lastRun.prompt : buildPrompt();
+    /* Лише «Перегенерувати» бере старий промпт. «Уточнити» — навпаки: увесь
+       його сенс у НОВОМУ тексті, тому він читає поле, як і звичайний запуск. */
+    const prompt = mode === 'again' && lastRun ? lastRun.prompt : buildPrompt();
     if (!prompt) { await core.showAlert(mainI18n.t('alert.writePrompt')); return null; }
 
     const provider = currentProvider();
@@ -912,29 +974,89 @@ async function capturePayload({ s, provider, ctx, target }) {
                     `${cap.lossless ? ' PNG' : ' JPEG'}`);
     }
 
+    /* Форму виділення читаємо ОКРЕМИМ модальним блоком, уже знаючи режим
+       документа: у CMYK getSelection валить Photoshop, і туди ми не йдемо. */
+    let shape = null;
+    if (wantMask) {
+        const got = await core.executeAsModal(() => capture.selectionShape(ctx, target, cap.docMode),
+            { commandName: mainI18n.t('command.readSelection') });
+        shape = got.data;
+        if (got.reason) console.warn('[main] форма виділення недоступна, маска прямокутна:', got.reason);
+    }
+
     const mask = wantMask
-        ? capture.maskForRequest({ ctx, target, feather: s.feather, input: cap.blob })
+        ? capture.maskForRequest({ ctx, target, feather: s.feather, input: cap.blob, shape })
         : { blob: null, bytes: 0, reason: '' };
     if (mask.reason) console.warn('[main] маски не буде:', mask.reason);
-    else if (mask.blob) console.log(`[main] маска ${ctx.w}×${ctx.h}, край ${s.feather} px: ` +
-                                    `${(mask.bytes / 1024).toFixed(1)} КБ`);
+    else if (mask.blob) console.log(`[main] маска ${ctx.w}×${ctx.h} (${mask.source}), ` +
+                                    `край ${s.feather} px: ${(mask.bytes / 1024).toFixed(1)} КБ`);
 
     return { input: cap.blob, mask: mask.blob };
 }
 
-/** Пам'ять про запуск: кеш, історія і кнопка «Перегенерувати». */
+/** Пам'ять про запуск: кеш, історія і кнопки повтору. */
 async function rememberRun(meta, image, s) {
     const cacheId = await cache.save(image, meta);
     renderCache();
-    lastRun = { ...meta };
+    // cacheId у lastRun — щоб перший хід «Уточнити» мав звідки взяти пікселі,
+    // не тримаючи мегабайти base64 у пам'яті панелі між запусками.
+    lastRun = { ...meta, cacheId };
     historyManager.add({ ...meta, cacheId, settings: s });
     renderHistory();
 }
 
-async function onGenerate(reuse) {
-    if (busy) return;
+/**
+ * Чи є що уточнювати. Три умови, і кожна вміє відмовити окремо: був запуск,
+ * від нього лишились пікселі або id розмови, і провайдер узагалі вміє маршрут.
+ */
+function canRefine() {
+    if (!lastRun || !lastRun.ctx) return false;
+    if (currentProvider().supportsRefine !== true) return false;
+    return Boolean(lastRun.responseId || lastRun.cacheId);
+}
 
-    const run = await collectRunInputs(reuse);
+/**
+ * Уточнення: запит до провайдера плюс те, що треба знати вставці.
+ *
+ * ⚠️ ГЕОМЕТРІЯ БЕРЕТЬСЯ З ТОГО ЗАПУСКУ, ЯКИЙ УТОЧНЮЄМО, а не з поточних
+ * налаштувань. Уточнюється вже намальована плитка; якби ми, як «Перегенерувати»,
+ * перечитали повзунок контексту, картинка лягла б у кадр, якого не зображує.
+ */
+async function runRefine({ provider, model, prompt, apiKey, s }) {
+    const previousImage = lastRun.responseId ? null : await cache.get(lastRun.cacheId);
+    if (!lastRun.responseId && !previousImage) {
+        await core.showAlert(mainI18n.t('cache.fileMissing'));
+        return null;
+    }
+    setStatus(mainI18n.t('status.refining'));
+    const plan = lastRun.plan || geometry.planRequest(provider.capsFor(model), lastRun.ctx, s.quality);
+    console.log('[main] уточнення:', JSON.stringify(plan),
+                'ctx', lastRun.ctx.w + '×' + lastRun.ctx.h,
+                lastRun.responseId ? 'продовження розмови' : 'перший хід');
+
+    const res = await provider.refine({
+        apiKey, model, prompt, plan,
+        previousResponseId: lastRun.responseId || null,
+        previousImage,
+        signal: abortCtrl ? abortCtrl.signal : undefined,
+        onPartial: s.livePreview ? (b64, idx) => {
+            showPreview(b64);
+            setStatus(mainI18n.t('status.partial', { number: (idx ?? 0) + 1 }));
+        } : null,
+        onProgress: st => setStatus(st),
+    });
+    return { res, plan, ctx: lastRun.ctx, target: lastRun.target };
+}
+
+async function onGenerate(mode) {
+    if (busy) return;
+    const refining = mode === 'refine';
+    if (refining && !canRefine()) {
+        await core.showAlert(mainI18n.t('plan.refineNoRun'));
+        return;
+    }
+
+    const run = await collectRunInputs(mode);
     if (!run) return;
     const { doc, provider, model, prompt, apiKey, s } = run;
 
@@ -946,38 +1068,47 @@ async function onGenerate(reuse) {
     if (residual) residual.textContent = '';
 
     try {
-        /* 1. Область */
-        const region = await resolveRegion(reuse, doc, s.padPercent);
-        if (!region) return;
-        const { target, ctx } = region;
+        let res, plan, ctx, target, input = null, refBlobs = [];
 
-        /* 2. Що просити в провайдера */
-        const plan = geometry.planRequest(provider.capsFor(model), ctx, s.quality);
-        console.log('[main] план запиту:', JSON.stringify(plan), 'ctx', ctx.w + '×' + ctx.h);
+        if (refining) {
+            const done = await runRefine({ provider, model, prompt, apiKey, s });
+            if (!done) return;
+            ({ res, plan, ctx, target } = done);
+        } else {
+            /* 1. Область */
+            const region = await resolveRegion(mode === 'again', doc, s.padPercent);
+            if (!region) return;
+            ({ target, ctx } = region);
 
-        /* 3. Пікселі й маска — документ користувача не змінюється */
-        const { input, mask } = await capturePayload({ s, provider, ctx, target });
+            /* 2. Що просити в провайдера */
+            plan = geometry.planRequest(provider.capsFor(model), ctx, s.quality);
+            console.log('[main] план запиту:', JSON.stringify(plan), 'ctx', ctx.w + '×' + ctx.h);
 
-        /* 4. Генерація — поза модальним контекстом, щоб Photoshop не блокувався */
-        setStatus(mainI18n.t('status.generating'));
-        const wantPreview = s.livePreview && provider.supportsStream !== false;
-        const refBlobs = (provider.supportsReferences !== false)
-            ? references.map(r => r.blob) : [];
+            /* 3. Пікселі й маска — документ користувача не змінюється */
+            const payload = await capturePayload({ s, provider, ctx, target });
+            input = payload.input;
 
-        const res = await provider.generate({
-            apiKey, model, prompt,
-            imageBlob: input, maskBlob: mask,
-            references: refBlobs,
-            plan,
-            background: s.transparent && provider.supportsTransparent !== false ? 'transparent' : null,
-            ignorePixels: s.ignorePixels,
-            signal: abortCtrl ? abortCtrl.signal : undefined,
-            onPartial: wantPreview ? (b64, idx) => {
-                showPreview(b64);
-                setStatus(mainI18n.t('status.partial', { number: (idx ?? 0) + 1 }));
-            } : null,
-            onProgress: st => setStatus(st),
-        });
+            /* 4. Генерація — поза модальним контекстом, щоб Photoshop не блокувався */
+            setStatus(mainI18n.t('status.generating'));
+            const wantPreview = s.livePreview && provider.supportsStream !== false;
+            refBlobs = (provider.supportsReferences !== false)
+                ? references.map(r => r.blob) : [];
+
+            res = await provider.generate({
+                apiKey, model, prompt,
+                imageBlob: input, maskBlob: payload.mask,
+                references: refBlobs,
+                plan,
+                background: s.transparent && provider.supportsTransparent !== false ? 'transparent' : null,
+                ignorePixels: s.ignorePixels,
+                signal: abortCtrl ? abortCtrl.signal : undefined,
+                onPartial: wantPreview ? (b64, idx) => {
+                    showPreview(b64);
+                    setStatus(mainI18n.t('status.partial', { number: (idx ?? 0) + 1 }));
+                } : null,
+                onProgress: st => setStatus(st),
+            });
+        }
 
         const images = (res && res.images) || [];
         if (!images.length) { await core.showAlert(mainI18n.t('alert.noImages')); return; }
@@ -985,14 +1116,18 @@ async function onGenerate(reuse) {
 
         // Записуємо одразу після успішної відповіді API: гроші вже витрачені,
         // навіть якщо користувач перемкне документ і вставку доведеться скасувати.
+        /* ⚠️ route у записі — не прикраса. Прогноз ціни бере медіану ВЛАСНИХ
+           запитів користувача; токени розмови й токени images/edits — різні
+           величини, і змішані в одну медіану вони зіпсували б обидві оцінки. */
         recordUsage({
             provider: provider.id,
             providerLabel: provider.label,
             model,
             quality: s.quality,
             plan,
+            route: refining ? 'responses' : 'edits',
             imageCount: images.length,
-            hasImageInput: !!input || refBlobs.length > 0,
+            hasImageInput: refining || !!input || refBlobs.length > 0,
         }, res.usage);
 
         /* 5. Вставка */
@@ -1003,9 +1138,20 @@ async function onGenerate(reuse) {
         setStatus(mainI18n.t('status.inserting'));
         await insertImage(images[0], ctx, target, s.feather);
 
-        /* 6. Пам'ять про запуск */
-        await rememberRun({ prompt, provider: provider.id, model, ctx, target,
-                            padPercent: s.padPercent, quality: s.quality }, images[0], s);
+        /* 6. Пам'ять про запуск.
+           Уточнення НЕ переписує prompt: «Перегенерувати» після нього має
+           означати «той самий початковий задум наново», а не повтор репліки
+           «зроби тінь м'якшою» по вихідних пікселях. Змінюються лише ланка
+           розмови (responseId) і кадр, який тепер уточнюємо (cacheId у rememberRun). */
+        await rememberRun({
+            prompt: refining ? lastRun.prompt : prompt,
+            provider: provider.id, model, ctx, target, plan,
+            padPercent: refining ? lastRun.padPercent : s.padPercent,
+            quality: s.quality,
+            responseId: res.responseId || null,
+            turn: refining ? (lastRun.turn || 1) + 1 : 1,
+            refinedWith: refining ? prompt : undefined,
+        }, images[0], s);
         setStatus(mainI18n.t('status.done'));
 
     } catch (e) {
@@ -1138,10 +1284,13 @@ document.addEventListener('DOMContentLoaded', () => {
     watchSelection();
 
     const btn = $('generate-btn');
-    if (btn) btn.addEventListener('click', () => onGenerate(false));
+    if (btn) btn.addEventListener('click', () => onGenerate('new'));
 
     const regen = $('regen-btn');
-    if (regen) regen.addEventListener('click', () => onGenerate(true));
+    if (regen) regen.addEventListener('click', () => onGenerate('again'));
+
+    const refineBtn = $('refine-btn');
+    if (refineBtn) refineBtn.addEventListener('click', () => onGenerate('refine'));
 
     const cancel = $('cancel-btn');
     if (cancel) cancel.addEventListener('click', () => {

@@ -301,6 +301,90 @@ function setPngResolution(png, ppi) {
  * @param {{left,top,right,bottom}} rect — у координатах маски, не документа
  * @param {number} feather — 0 = жорсткий край
  */
+/**
+ * Розмиття «коробкою», розділене по осях: три проходи наближають гаус, і все
+ * це лишається O(n) — на масці 1.3 Мп це мілісекунди, тоді як чесна відстань
+ * до контуру коштувала б секунди в JS.
+ */
+function blurAxis(src, dst, w, h, r, vertical) {
+    const outer = vertical ? w : h;
+    const inner = vertical ? h : w;
+    const step = vertical ? w : 1;
+    const win = 2 * r + 1;
+    for (let o = 0; o < outer; o++) {
+        const base = vertical ? o : o * w;
+        const at = i => src[base + Math.min(inner - 1, Math.max(0, i)) * step];
+        let sum = 0;
+        for (let i = -r; i <= r; i++) sum += at(i);
+        for (let i = 0; i < inner; i++) {
+            dst[base + i * step] = (sum / win) + 0.5;
+            sum += at(i + r + 1) - at(i - r);
+        }
+    }
+}
+
+function boxBlur(src, w, h, radius) {
+    const r = Math.max(1, Math.round(radius));
+    const a = new Uint8Array(w * h);
+    const b = new Uint8Array(w * h);
+    a.set(src);
+    // три проходи коробкою ≈ гаус; кожен розділений на дві осі, разом O(n)
+    for (let pass = 0; pass < 3; pass++) {
+        blurAxis(a, b, w, h, r, false);
+        blurAxis(b, a, w, h, r, true);
+    }
+    return a;
+}
+
+/**
+ * Маска inpainting ДОВІЛЬНОЇ форми — з реального виділення, а не з його рамки.
+ *
+ * ⚠️ НАВІЩО ЦЕ ІСНУЄ ПОРЯД ІЗ buildRectMaskPng. До 2026-09-09 в API завжди
+ * летів прямокутник, хоча Photoshop знав контур: маска ШАРУ різалася по формі,
+ * а маска ЗАПИТУ — ні. Наслідок вимірювався в хості: усе, що ділило bounding
+ * box із ціллю, модель мала право перемалювати, і людині, чия голова
+ * потрапила в кут рамки, її стерло. Крім того, справжні пікселі всередині
+ * рамки, але поза формою, віддавались моделі як «зітри» замість «ось контекст».
+ *
+ * @param {Uint8Array} sel — w*h, 255 = «змінити тут», 0 = «зберегти як контекст»
+ * @param {number} feather — повна ширина переходу в пікселях, симетрична навколо контуру
+ */
+function buildShapeMaskPng(width, height, sel, feather = 0) {
+    if (!sel || sel.length !== width * height) {
+        throw new Error(pngI18n.t('png.emptyMask'));
+    }
+    /* ⚠️ Три проходи коробкою дають видимий перехід шириною ≈3r, а не r —
+       тому радіус беремо feather/3, інакше «край 16 px» розмивав би 48.
+       І зажимаємо його половиною меншого боку самої форми: ширший градієнт
+       з'їв би її серцевину, і повністю прозорих пікселів не лишилось би
+       взагалі — модель повернула б вхід без змін. */
+    let minX = width, minY = height, maxX = -1, maxY = -1;
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            if (sel[y * width + x] > 127) {
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
+            }
+        }
+    }
+    if (maxX < 0) throw new Error(pngI18n.t('png.emptyMask'));
+    const f = Math.min(feather, (maxX - minX) / 2, (maxY - minY) / 2);
+    const soft = f >= 2 ? boxBlur(sel, width, height, f / 3) : sel;
+    const px = new Uint8Array(width * height * 4);
+    let editable = 0;
+    for (let i = 0, o = 0; i < width * height; i++, o += 4) {
+        const a = 255 - soft[i];            // alpha: 0 = змінити, 255 = зберегти
+        if (a < 128) editable++;
+        px[o] = px[o + 1] = px[o + 2] = a;  // RGB косметика, провайдер читає альфу
+        px[o + 3] = a;
+    }
+    // Порожня маска означала б «нічого не міняти» — модель повернула б вхід.
+    if (!editable) throw new Error(pngI18n.t('png.emptyMask'));
+    return encodePng(px, width, height, 4);
+}
+
 function buildRectMaskPng(width, height, rect, feather = 0) {
     const L = Math.max(0, Math.round(rect.left));
     const T = Math.max(0, Math.round(rect.top));
@@ -341,5 +425,5 @@ function buildRectMaskPng(width, height, rect, feather = 0) {
 
 module.exports = {
     crc32, adler32, w32, makeChunk, deflateRle, MAX_DIST,
-    encodePng, readPngSize, setPngResolution, buildRectMaskPng,
+    encodePng, readPngSize, setPngResolution, buildRectMaskPng, buildShapeMaskPng, boxBlur,
 };

@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.6.0 — 2026-09-09
+
+- **The mask sent to the API now follows the shape of your selection, not its bounding box.** This
+  is the difference between inpainting and repainting: everything fully transparent in the mask is
+  where the model may draw, so a rectangular mask around a lasso selection told it that the whole
+  rectangle was free canvas — measured on a sky selection, the model happily replaced a person
+  standing inside that rectangle. Only the layer mask kept the damage out of the document. The
+  request mask is now built from the real selection channel and feathered with a separable box
+  blur; the plan card says "with shaped mask" when it will be. Measured 2026-09-09: for a sky
+  selection tracing bare tree branches the mask grew from 18.6 KB to 454.6 KB, which is the
+  geometry that used to be thrown away. Outside RGB/Grayscale/Lab the shape is not read at all
+  (`imaging.getSelection` crashes Photoshop in CMYK); there the request falls back to a rectangle
+  and the panel now says so under the result instead of only in the console.
+- **The plan card forecasts the price before you press the button.** GPT Image 2 and 2.5 are billed
+  by output tokens, so there is no per-image price to look up — the estimate is a median of your
+  own past requests at that model and quality level, seeded with measured medians so it works from
+  the first run and self-calibrates afterwards. It shows a range, because the spread of output
+  tokens at a fixed quality level is roughly ±40%, and it shows nothing at all when there is
+  nothing to base a number on. Validated against 80 real ledger entries to within 3%.
+- **"Refine" — change the last result by describing what to fix.** It reworks the frame that was
+  already generated instead of starting from the original pixels, and it goes through the Responses
+  API so the model keeps the previous frame in mind: "now make the shadow softer" is read against
+  its own earlier intent. The first press sends the finished tile; every press after that sends
+  only the conversation link. Refine is pinned to the geometry of the run it refines — a context
+  slider moved in between cannot make the tile land in a frame it does not depict — and it does not
+  overwrite your prompt, so "Regenerate" still means the original request. OpenAI only; the button
+  stays greyed out for providers without that route.
+- The context percentage is now applied per axis. On a 1011×423 strip "15%" used to mean +30% of
+  the width but +72% of the height, because the padding came from the longer side: the card showed
+  a frame twice the size of the one requested, and you paid for it.
+- The plan card warns about a hard edge (edge blend 0) when a mask is being sent, since that is a
+  visible seam at the join rather than a matter of taste.
+- `output_format` stays PNG, and that is now written down as a dependency rather than a default:
+  exact placement works by writing a pHYs chunk with the document's resolution into the returned
+  file, and WebP has no resolution field at all. A test fails the build if a second format is
+  requested without teaching the placement path to carry the DPI.
+
+
 ## 1.5.0 — 2026-09-09
 
 - **Added GPT Image 2.5** in both variants: `gpt-image-2.5-sunburst` (base model, best quality) and
