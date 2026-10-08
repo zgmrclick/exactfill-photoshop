@@ -34,8 +34,8 @@ async function withPixels(params, fn) {
     finally { try { res.imageData.dispose(); } catch (e) { console.warn('[dispose]', e.message); } }
 }
 
-/* PNG-хелпери — у png.js (там справжній deflate, а не stored-блоки старого коду). */
-const { readPngSize, setPngResolution } = require('./png.js');
+/* PNG/JPEG-хелпери — у png.js (там справжній deflate, а не stored-блоки старого коду). */
+const { readPngSize, setPngResolution, prepareForPlace } = require('./png.js');
 
 function base64ToBytes(b64) {
     const bin = atob(b64.replace(/^data:[^,]+,/, ''));
@@ -192,7 +192,7 @@ const { integerTarget, insetBlendRadius, planFrame } = require('./geometry.js');
 
 /* ══════════════════════════════════════════════════════════════════════════
  *  ГОЛОВНА ФУНКЦІЯ
- *  b64        — PNG у base64 від провайдера
+ *  b64        — PNG або JPEG у base64 від провайдера (Gemini дає лише JPEG)
  *  bounds     — межі виділення в пікселях документа (можуть бути дробові)
  *  channelName— альфа-канал зі збереженим виділенням; null = прямокутна маска
  *  opts.maskBounds — початкові межі виділення для гарантованого fallback
@@ -208,8 +208,8 @@ async function placeGeneratedSmartObject(b64, bounds, channelName, opts = {}) {
         throw new Error(placeI18n.t('place.emptyTarget', { width: target.w, height: target.h }));
     }
 
-    const png = setPngResolution(base64ToBytes(b64), doc.resolution);
-    const nat = readPngSize(png);
+    const file = prepareForPlace(base64ToBytes(b64), doc.resolution);
+    const nat = file.size;
     const dst = planFrame(target, nat);
 
     let tempFile = null;
@@ -218,13 +218,14 @@ async function placeGeneratedSmartObject(b64, bounds, channelName, opts = {}) {
     const report = { mode: dst.mode, nat, target, applied: null, residual: null, warnings: [] };
 
     try {
-        /* 1. PNG на диск + session token. Байти йдуть у Photoshop файлом —
+        /* 1. Файл на диск + session token. Байти йдуть у Photoshop файлом —
               imaging API не задіяний узагалі, тому CMYK/16/32 біт безпечні. */
         const fs = uxpStorage.localFileSystem;
         const folder = await fs.getTemporaryFolder();
-        tempFile = await folder.createFile(`ai_${Date.now()}_${Math.floor(Math.random() * 1e4)}.png`,
+        tempFile = await folder.createFile(`ai_${Date.now()}_${Math.floor(Math.random() * 1e4)}.${file.ext}`,
             { overwrite: true });
-        await tempFile.write(png.buffer.slice(png.byteOffset, png.byteOffset + png.byteLength),
+        await tempFile.write(file.bytes.buffer.slice(file.bytes.byteOffset,
+                                                    file.bytes.byteOffset + file.bytes.byteLength),
             { format: uxpStorage.formats.binary });
         const token = fs.createSessionToken(tempFile);
 

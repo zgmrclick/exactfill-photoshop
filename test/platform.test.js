@@ -330,14 +330,13 @@ test('уточнення прив’язане до геометрії того 
     assert.match(main, /prompt:\s*refining \? lastRun\.prompt : prompt/);
 });
 
-test('формат відповіді зв’язаний із pHYs, і зв’язка не рветься мовчки', () => {
-    /* ⚠️ Це гейт на ЗАЛЕЖНІСТЬ, а не на константу. `output_format: 'png'`
-       виглядає як довільний дефолт, який колись «оптимізують» на webp заради
-       трафіку. Насправді на ньому стоїть точна вставка: place.js вписує в
-       отриманий файл pHYs із роздільністю документа, інакше placeEvent бере
-       72 ppi. У WebP такого поля не існує взагалі. Тому гейт вимагає, щоб
-       формат просили ЯВНО в усіх трьох маршрутах і рівно один — доки хтось не
-       навчить place.js другого формату, а тоді цей тест і треба переписати. */
+test('формат відповіді зв’язаний із роздільністю у файлі, і зв’язка не рветься мовчки', () => {
+    /* ⚠️ Це гейт на ЗАЛЕЖНІСТЬ, а не на константу. Точна вставка стоїть на тому,
+       що place.js вписує в отриманий файл роздільність документа (pHYs у PNG,
+       JFIF density у JPEG), інакше placeEvent бере 72 ppi. З 2026-10-08 place.js
+       знає обидва формати, бо Gemini віддає лише JPEG. У WebP поля роздільності
+       не існує взагалі — тому OpenAI і далі просить формат ЯВНО в усіх трьох
+       маршрутах, і webp заборонено. */
     const openai = fs.readFileSync(path.join(ROOT, 'providers/openai.js'), 'utf8');
     assert.match(openai, /const OUTPUT_FORMAT = 'png';/);
     // Три маршрути перелічені поіменно, а не полічені: лічильник збігів ламався б
@@ -345,12 +344,12 @@ test('формат відповіді зв’язаний із pHYs, і зв’�
     assert.match(openai, /\{ name: 'output_format', data: OUTPUT_FORMAT \}/, 'images/edits');
     assert.match(openai, /n: 1, output_format: OUTPUT_FORMAT/, 'images/generations');
     assert.match(openai, /type: 'image_generation', output_format: OUTPUT_FORMAT/, 'responses');
-    assert.doesNotMatch(openai, /output_format['"]?\s*[:,]\s*['"](webp|jpeg)/,
-        'другий формат без роботи в place.js зламає точність вставки');
+    assert.doesNotMatch(openai, /output_format['"]?\s*[:,]\s*['"]webp/,
+        'у WebP немає поля роздільності — вставка втратить точність');
 
     const place = fs.readFileSync(path.join(ROOT, 'place.js'), 'utf8');
-    assert.match(place, /setPngResolution\(base64ToBytes\(b64\), doc\.resolution\)/,
-        'саме цей рядок і робить формат несучим');
-    assert.match(place, /createFile\(`ai_\$\{Date\.now\(\)\}_\$\{Math\.floor\(Math\.random\(\) \* 1e4\)\}\.png`/,
-        'розширення тимчасового файлу теж прибите до png');
+    assert.match(place, /prepareForPlace\(base64ToBytes\(b64\), doc\.resolution\)/,
+        'саме цей рядок і робить роздільність несучою');
+    assert.match(place, /createFile\(`ai_\$\{Date\.now\(\)\}_\$\{Math\.floor\(Math\.random\(\) \* 1e4\)\}\.\$\{file\.ext\}`/,
+        'розширення тимчасового файлу мусить відповідати байтам — Photoshop читає формат з нього');
 });

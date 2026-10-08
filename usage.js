@@ -58,6 +58,12 @@ const OPENAI = {
 };
 
 const GOOGLE = {
+    // 4K = 3780 токенів → $0.113 (сторінка цін Google, 2026-10-08). Сторонні
+    // огляди пишуть $0.0756 — це 2520 токенів, як у Nano Banana 2; невірно.
+    'gemini-nano-banana-2.1': {
+        input: 1.5, textOut: 7.5, imageOut: 30,
+        flat: { '1K': 0.0336, '2K': 0.0504, '4K': 0.113 },
+    },
     'gemini-3.1-flash-image': {
         input: 0.5, textOut: 3, imageOut: 60,
         flat: { '0.5K': 0.045, '1K': 0.067, '2K': 0.101, '4K': 0.151 },

@@ -71,6 +71,15 @@ test('Gemini Pro 4K fallback включає input і картинку', () => {
     closeTo(result.usd, 0.242);
 });
 
+test('Nano Banana 2.1 4K — $0.113 за офіційною таблицею, не $0.0756 зі сторонніх оглядів', () => {
+    const result = usage.estimateCost({
+        provider: 'google', model: 'models/gemini-nano-banana-2.1',
+        plan: { imageSize: '4K' }, imageCount: 1,
+    }, null);
+    closeTo(result.usd, 0.113);
+    assert.equal(result.method, 'flat');
+});
+
 test('журнал дає останній запит, сьогодні та останні сім календарних днів', () => {
     const now = new Date(2026, 7, 11, 12, 0, 0).getTime();
     const entry = (daysAgo, cost) => ({

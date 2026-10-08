@@ -184,3 +184,65 @@ test('чужі помилки explainModelError не чіпає', () => {
         assert.equal(openai.explainModelError(e, 'gpt-image-2'), e, `${e.status}/${e.code} не мала змінитись`);
     }
 });
+
+/* ── Gemini: що з каталогу ListModels потрапляє в пікер ───────────────────── */
+
+/* Справжній знімок ListModels (лише image-моделі), 2026-10-08, у порядку API.
+   Для Google каталог — джерело правди: на відміну від OpenAI, тут він
+   відповідає на питання доступу (перевірено countTokens: 2.1 → 200,
+   zzz-model-that-cannot-exist → 404). */
+const GEMINI_CATALOG_2026_10_08 = [
+    ['models/gemini-2.5-flash-image', 'Nano Banana'],
+    ['models/gemini-3-pro-image-preview', 'Nano Banana Pro'],
+    ['models/gemini-3-pro-image', 'Nano Banana Pro'],
+    ['models/nano-banana-pro-preview', 'Nano Banana Pro'],
+    ['models/gemini-3.1-flash-image-preview', 'Nano Banana 2'],
+    ['models/gemini-3.1-flash-image', 'Nano Banana 2'],
+    ['models/gemini-3.1-flash-lite-image', 'Nano Banana 2 Lite'],
+    ['models/gemini-nano-banana-2.1', 'Nano Banana 2.1'],
+    ['models/gemini-2.5-flash', 'Gemini 2.5 Flash'],   // текстова — не в пікер
+].map(([name, displayName]) => ({
+    name, displayName, supportedGenerationMethods: ['generateContent', 'countTokens'],
+}));
+
+test('Nano Banana 2.1 потрапляє в пікер і стоїть першою — це модель за замовчуванням', () => {
+    /* ID `gemini-nano-banana-2.1` не містить «-image»: старий фільтр ховав
+       найновішу модель, а першою (тобто за замовчуванням) ставав вимкнений
+       gemini-2.5-flash-image — просто тому, що API віддає його першим. */
+    const list = google.pickImageModels(GEMINI_CATALOG_2026_10_08);
+    assert.equal(list[0].id, 'models/gemini-nano-banana-2.1');
+    assert.ok(!list.some(m => m.id === 'models/gemini-2.5-flash-image'), 'вимкнена 2026-10-02');
+    assert.ok(!list.some(m => m.id === 'models/gemini-2.5-flash'), 'текстова модель у пікері');
+});
+
+test('preview-аліаси з тією самою назвою не дублюють пункти пікера', () => {
+    const list = google.pickImageModels(GEMINI_CATALOG_2026_10_08);
+    const labels = list.map(m => m.label);
+    assert.equal(new Set(labels).size, labels.length, `дублікати: ${labels.join(', ')}`);
+    assert.deepEqual(list.map(m => m.id), [
+        'models/gemini-nano-banana-2.1',
+        'models/gemini-3-pro-image',
+        'models/gemini-3.1-flash-image',
+        'models/gemini-3.1-flash-lite-image',
+    ]);
+});
+
+test('caps Nano Banana 2.1: 4K і панорамні формати; Lite — лише 1K', () => {
+    const nb21 = google.capsFor('models/gemini-nano-banana-2.1');
+    assert.deepEqual(nb21.imageSizes, ['1K', '2K', '4K']);
+    for (const a of ['1:4', '4:1', '1:8', '8:1']) assert.ok(nb21.aspects.includes(a), a);
+    // той самий ID без префікса models/ — так його пише ledger і старі налаштування
+    assert.equal(google.capsFor('gemini-nano-banana-2.1'), nb21);
+    assert.deepEqual(google.capsFor('models/gemini-3.1-flash-lite-image').imageSizes, ['1K']);
+    // панорами — лише там, де документовані: старшим моделям це 400 і втрата керування розміром
+    assert.ok(!google.capsFor('models/gemini-3.1-flash-image').aspects.includes('8:1'));
+});
+
+test('модель із живого каталогу має caps і ціну, а не лише вбудований перелік', () => {
+    for (const m of google.pickImageModels(GEMINI_CATALOG_2026_10_08)) {
+        const est = usage.estimateCost(
+            { provider: 'google', model: m.id, plan: { imageSize: '1K' }, imageCount: 1 },
+            { input_tokens: 100 });
+        assert.notEqual(est.method, 'unknown-model', `${m.id}: немає в таблиці цін usage.js`);
+    }
+});

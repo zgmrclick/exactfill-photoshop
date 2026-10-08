@@ -26,6 +26,7 @@ const usageTracker   = require('./usage.js');
 const ledger         = require('./ledger.js');
 const dom            = require('./ui-dom.js');
 const mainI18n       = require('./i18n.js');
+const { mimeOfB64 } = require('./png.js');
 
 /* Ключі сховища й читання налаштувань живуть окремо: перший — щоб не було
    пʼяти копій рядка 'ai_provider' по файлах, друге — щоб зведення якості до
@@ -138,7 +139,7 @@ function showPreview(b64) {
     const wrap = $('preview-wrap'), img = $('preview-img');
     if (!wrap || !img) return;
     if (!b64) { wrap.classList.add('hidden'); img.removeAttribute('src'); return; }
-    img.src = 'data:image/png;base64,' + b64;
+    img.src = `data:${mimeOfB64(b64)};base64,` + b64;
     wrap.classList.remove('hidden');
 }
 

@@ -19,6 +19,7 @@
 
 const { buildMultipart, request, requestStream, withRetry, HttpError } = require('./http.js');
 const openAiI18n = require('../i18n.js');
+const { mimeOfB64 } = require('../png.js');
 
 const BASE = 'https://api.openai.com/v1/';
 const PARTIAL_IMAGES = 3;
@@ -329,7 +330,8 @@ function refineInput({ prompt, previousResponseId, previousImage }) {
         // результату — саме вони і є предметом уточнення.
         content.push({
             type: 'input_image',
-            image_url: `data:image/png;base64,${previousImage}`,
+            // кешований кадр міг прийти від Gemini — а той віддає лише JPEG
+            image_url: `data:${mimeOfB64(previousImage)};base64,${previousImage}`,
             detail: 'auto',
         });
     }

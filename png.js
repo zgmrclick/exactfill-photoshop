@@ -423,7 +423,81 @@ function buildRectMaskPng(width, height, rect, feather = 0) {
     return encodePng(px, width, height, 4);
 }
 
+/* ── JPEG відповіді ─────────────────────────────────────────────────────────
+ *
+ * ⚠️ Gemini `generateContent` віддає ЛИШЕ JPEG (виміряно 2026-10-08):
+ * enum `responseFormat.image.mimeType` приймає `IMAGE_JPEG` і відкидає будь-яку
+ * назву PNG, а в `imageConfig` поля формату немає зовсім. Попросити PNG
+ * неможливо — тому вставка мусить знати другий формат.
+ *
+ * Тут лише те, що потрібно place.js: розмір (з SOF) і роздільність (JFIF APP0,
+ * аналог pHYs). Піксели не декодуємо — Photoshop робить це сам у placeEvent.
+ */
+
+const isJpeg = b => b.length > 3 && b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF;
+const isPng = b => b.length > 8 && PNG_SIG.every((v, i) => b[i] === v);
+
+/** Розміри з SOFn. Таблиці Хаффмана (C4), JPG (C8) і арифметики (CC) — не SOF. */
+function readJpegSize(jpg) {
+    let off = 2;
+    while (off + 4 <= jpg.length) {
+        if (jpg[off] !== 0xFF) break;
+        const marker = jpg[off + 1];
+        if (marker === 0xFF) { off++; continue; }            // заповнювач між сегментами
+        if (marker === 0xD9 || marker === 0xDA) break;       // EOI / початок даних
+        const len = (jpg[off + 2] << 8) | jpg[off + 3];
+        if (marker >= 0xC0 && marker <= 0xCF && marker !== 0xC4 && marker !== 0xC8 && marker !== 0xCC) {
+            if (off + 9 > jpg.length) break;
+            return { h: (jpg[off + 5] << 8) | jpg[off + 6], w: (jpg[off + 7] << 8) | jpg[off + 8] };
+        }
+        off += 2 + len;
+    }
+    throw new Error(pngI18n.t('png.invalid'));
+}
+
+/**
+ * Вписує роздільність у JFIF APP0 — навіщо, див. setPngResolution.
+ * Gemini кладе APP0 одразу після SOI (300 dpi); якщо його немає — вставляємо.
+ * Щільність у JFIF 16-бітна й ціла: дробові ppi округлюємо.
+ */
+function setJpegResolution(jpg, ppi) {
+    const dpi = Math.min(65535, Math.max(1, Math.round(ppi)));
+    const isJfif = jpg[2] === 0xFF && jpg[3] === 0xE0 &&
+        String.fromCharCode(jpg[6], jpg[7], jpg[8], jpg[9], jpg[10]) === 'JFIF\0' &&
+        ((jpg[4] << 8) | jpg[5]) >= 16;
+    if (isJfif) {
+        const out = jpg.slice();
+        out[13] = 1;                                         // одиниці: dots per inch
+        out[14] = dpi >> 8; out[15] = dpi & 0xFF;
+        out[16] = dpi >> 8; out[17] = dpi & 0xFF;
+        return out;
+    }
+    const app0 = Uint8Array.from([0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00,
+        0x01, 0x01, 1, dpi >> 8, dpi & 0xFF, dpi >> 8, dpi & 0xFF, 0x00, 0x00]);
+    return concat([jpg.subarray(0, 2), app0, jpg.subarray(2)]);
+}
+
+/**
+ * Результат провайдера → байти для placeEvent. Формат визначаємо за байтами, а не
+ * за mimeType відповіді: він же потім лежить у кеші й історії без жодних метаданих.
+ */
+function prepareForPlace(bytes, ppi) {
+    if (isPng(bytes)) {
+        const out = setPngResolution(bytes, ppi);
+        return { bytes: out, size: readPngSize(out), ext: 'png' };
+    }
+    if (isJpeg(bytes)) {
+        const out = setJpegResolution(bytes, ppi);
+        return { bytes: out, size: readJpegSize(out), ext: 'jpg' };
+    }
+    throw new Error(pngI18n.t('png.invalid'));
+}
+
+/** MIME за першими байтами base64: `/9j/` — це FF D8 FF, тобто JPEG. */
+const mimeOfB64 = b64 => (String(b64).startsWith('/9j/') ? 'image/jpeg' : 'image/png');
+
 module.exports = {
     crc32, adler32, w32, makeChunk, deflateRle, MAX_DIST,
     encodePng, readPngSize, setPngResolution, buildRectMaskPng, buildShapeMaskPng, boxBlur,
+    isJpeg, readJpegSize, setJpegResolution, prepareForPlace, mimeOfB64,
 };

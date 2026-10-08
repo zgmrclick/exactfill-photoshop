@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.7.0 — 2026-10-08
+
+- **Gemini results that arrive as JPEG are now inserted.** Gemini's `generateContent` returns JPEG only — the API's
+  output format setting accepts nothing but `IMAGE_JPEG` — while the insertion step accepted PNG
+  alone and failed with "invalid PNG" after the image had already been paid for. ExactFill now reads
+  the size and writes the document resolution into JPEG as well as PNG, and names the temporary file
+  by the actual format. Verified in Photoshop 2026: a 2928×352 Gemini JPEG lands as a Smart Object
+  at exactly 2928×352. The preview and "Refine" also label JPEG correctly.
+- **Nano Banana 2.1 (`gemini-nano-banana-2.1`) is available and is the default Gemini model.** Its ID
+  has no `-image` suffix, so the model list fetched from Google silently dropped it. It supports
+  1K/2K/4K output and the panoramic 1:4, 4:1, 1:8 and 8:1 ratios; priced at $0.0336 / $0.0504 /
+  $0.113 per 1K / 2K / 4K image.
+- The retired Nano Banana (`gemini-2.5-flash-image`, shut down 2026-10-02) no longer appears, and it
+  no longer becomes the default just because Google lists it first. Preview aliases that share a
+  name with a GA model ("Nano Banana Pro" ×3) are collapsed into one entry.
+- Nano Banana 2 Lite requests 1K only, matching Google's documentation.
+- Nano Banana 2 (`gemini-3.1-flash-image`) shuts down on 2026-10-29; after that a saved selection
+  falls back to Nano Banana 2.1 automatically.
+
 ## 1.6.0 — 2026-09-09
 
 - **The mask sent to the API now follows the shape of your selection, not its bounding box.** This

@@ -33,15 +33,41 @@ const ASPECTS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9'
  */
 const Q_CLASSIC = ['low', 'medium', 'high', 'auto'];
 
+/**
+ * Панорамні формати модель-сторінка 2.1 називає прямо (там виправлено
+ * артефакти тайлінгу на 2K/4K). Старшим моделям їх не додаємо: якщо API
+ * відкине формат, callWithFallback повторить запит уже БЕЗ керування розміром.
+ */
+const ASPECTS_WIDE = ASPECTS.concat(['1:4', '4:1', '1:8', '8:1']);
+
 const CAPS_PRO   = { arbitrary: false, aspects: ASPECTS, imageSizes: ['1K', '2K', '4K'], qualities: Q_CLASSIC };
 const CAPS_FLASH = { arbitrary: false, aspects: ASPECTS, imageSizes: ['1K', '2K'], qualities: Q_CLASSIC };
+const CAPS_NB21  = { arbitrary: false, aspects: ASPECTS_WIDE, imageSizes: ['1K', '2K', '4K'], qualities: Q_CLASSIC };
+// «only supports 1K resolution» — документація image-generation, 2026-10
+const CAPS_LITE  = { arbitrary: false, aspects: ASPECTS, imageSizes: ['1K'], qualities: Q_CLASSIC };
 
+/**
+ * Порядок — це вибір за замовчуванням: main.js бере list[0], коли збереженої
+ * моделі в переліку немає. Тому найновіша рекомендована модель стоїть першою.
+ * Підписи збігаються з displayName у ListModels, щоб пункт не перейменовувався,
+ * коли перелік приходить із мережі замість вбудованого.
+ *
+ * gemini-3.1-flash-image (Nano Banana 2) Google вимикає 2026-10-29; коли вона
+ * зникне з ListModels, збережений вибір сам перескочить на list[0], тобто 2.1.
+ */
 const FALLBACK_MODELS = [
-    { id: 'models/gemini-3-pro-image',          label: 'Gemini 3 Pro Image',        caps: CAPS_PRO },
-    { id: 'models/gemini-3.1-flash-image',      label: 'Gemini 3.1 Flash Image',    caps: CAPS_FLASH },
-    { id: 'models/gemini-3.1-flash-lite-image', label: 'Gemini 3.1 Flash Lite',     caps: CAPS_FLASH },
-    { id: 'models/gemini-2.5-flash-image',      label: 'Gemini 2.5 Flash Image',    caps: CAPS_FLASH },
+    { id: 'models/gemini-nano-banana-2.1',      label: 'Nano Banana 2.1',     caps: CAPS_NB21 },
+    { id: 'models/gemini-3-pro-image',          label: 'Nano Banana Pro',     caps: CAPS_PRO },
+    { id: 'models/gemini-3.1-flash-image',      label: 'Nano Banana 2',       caps: CAPS_FLASH },
+    { id: 'models/gemini-3.1-flash-lite-image', label: 'Nano Banana 2 Lite',  caps: CAPS_LITE },
 ];
+
+/**
+ * Вимкнені Google, але ListModels їх ще перелічує (виміряно 2026-10-08).
+ * gemini-2.5-flash-image — shutdown 2026-10-02 за сторінкою цін; стояла першою
+ * в каталозі, тобто ставала моделлю за замовчуванням для нового ключа.
+ */
+const RETIRED = new Set(['models/gemini-2.5-flash-image']);
 
 const authHeaders = apiKey => ({
     'x-goog-api-key': apiKey,          // НЕ в query-рядку — щоб не текло в логи
@@ -57,23 +83,7 @@ async function models(apiKey) {
     if (!apiKey) return FALLBACK_MODELS.map(m => ({ ...m }));
     try {
         const json = await request(`${BASE}models`, { headers: authHeaders(apiKey), timeoutMs: 20000 });
-        const list = (json && json.models) || [];
-        const found = [];
-        for (const m of list) {
-            const name = String(m.name || '');
-            const low = name.toLowerCase();
-            // лише генератори зображень; Imagen свідомо не беремо — вимкнений
-            if (!low.includes('-image')) continue;
-            if (low.includes('imagen')) continue;
-            const methods = m.supportedGenerationMethods || m.supported_generation_methods;
-            if (Array.isArray(methods) && !methods.includes('generateContent')) continue;
-            const isPro = low.includes('-pro-');
-            found.push({
-                id: name,
-                label: (m.displayName || name.replace(/^models\//, '')),
-                caps: isPro ? CAPS_PRO : CAPS_FLASH,
-            });
-        }
+        const found = pickImageModels((json && json.models) || []);
         if (found.length) return found;
     } catch (e) {
         console.warn('[google] перелік моделей не отримано, беремо вбудований:', e.message);
@@ -81,10 +91,53 @@ async function models(apiKey) {
     return FALLBACK_MODELS.map(m => ({ ...m }));
 }
 
+/**
+ * Відповідь ListModels → пункти пікера. Чиста функція, щоб тест годував її
+ * справжнім знімком каталогу без підміни мережі.
+ *
+ * ⚠️ Ознака «-image» в ID більше не достатня: Nano Banana 2.1 має ID
+ * `gemini-nano-banana-2.1` без цього суфікса, і старий фільтр ховав її мовчки.
+ */
+function pickImageModels(list) {
+    const found = [];
+    for (const m of list) {
+        const name = String(m.name || '');
+        const low = name.toLowerCase();
+        // лише генератори зображень; Imagen свідомо не беремо — вимкнений
+        if (!low.includes('-image') && !low.includes('nano-banana')) continue;
+        if (low.includes('imagen')) continue;
+        if (RETIRED.has(name)) continue;
+        const methods = m.supportedGenerationMethods || m.supported_generation_methods;
+        if (Array.isArray(methods) && !methods.includes('generateContent')) continue;
+        found.push({
+            id: name,
+            label: (m.displayName || name.replace(/^models\//, '')),
+            caps: capsFor(name),
+        });
+    }
+    // Каталог дублює GA-моделі preview-аліасами з ТІЄЮ САМОЮ назвою
+    // (три пункти «Nano Banana Pro»). Розрізнити їх у пікері неможливо — лишаємо GA.
+    const gaLabels = new Set(found.filter(m => !isPreview(m.id)).map(m => m.label));
+    const unique = found.filter(m => !(isPreview(m.id) && gaLabels.has(m.label)));
+    // Відомі — у порядку FALLBACK_MODELS (перша = за замовчуванням), невідомі — за ними.
+    const rank = id => {
+        const i = FALLBACK_MODELS.findIndex(x => x.id === id);
+        return i < 0 ? FALLBACK_MODELS.length : i;
+    };
+    return unique
+        .map((m, i) => ({ m, i }))
+        .sort((a, b) => (rank(a.m.id) - rank(b.m.id)) || (a.i - b.i))
+        .map(x => x.m);
+}
+
+const isPreview = id => /-preview$/i.test(id);
+
 function capsFor(modelId) {
-    const m = FALLBACK_MODELS.find(x => x.id === modelId);
+    const id = String(modelId);
+    const m = FALLBACK_MODELS.find(x => x.id === id || x.id === `models/${id}`);
     if (m) return m.caps;
-    return String(modelId).toLowerCase().includes('-pro-') ? CAPS_PRO : CAPS_FLASH;
+    // Невідома модель — найобережніші припущення; 4K лише в Pro-лінійки.
+    return id.toLowerCase().includes('-pro-') ? CAPS_PRO : CAPS_FLASH;
 }
 
 /** Пояснює причину, коли модель нічого не віддала. */
@@ -228,6 +281,7 @@ module.exports = {
     supportsStream: false,
     keyPage: 'https://aistudio.google.com/apikey',
     models,
+    pickImageModels,
     capsFor,
     generate,
 };
