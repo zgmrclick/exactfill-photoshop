@@ -33,7 +33,7 @@ ExactFill — безкоштовний плагін Photoshop із відкри�
 
 ## Встановлення
 
-Завантажте `ExactFill-1.5.0.zip` зі сторінки
+Завантажте `ExactFill-1.7.1.zip` зі сторінки
 [Releases](https://github.com/zgmrclick/exactfill-photoshop/releases), повністю
 розпакуйте архів і закрийте Photoshop.
 

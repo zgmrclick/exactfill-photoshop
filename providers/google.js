@@ -52,8 +52,10 @@ const CAPS_LITE  = { arbitrary: false, aspects: ASPECTS, imageSizes: ['1K'], qua
  * Підписи збігаються з displayName у ListModels, щоб пункт не перейменовувався,
  * коли перелік приходить із мережі замість вбудованого.
  *
- * gemini-3.1-flash-image (Nano Banana 2) Google вимикає 2026-10-29; коли вона
- * зникне з ListModels, збережений вибір сам перескочить на list[0], тобто 2.1.
+ * gemini-3.1-flash-image (Nano Banana 2): дати вимкнення НЕМАЄ — сторінка
+ * deprecations 2026-10-12 пише «No shutdown date announced» і лише радить 2.1
+ * як заміну. (До 1.7.1 тут стояло «2026-10-29» — без джерела.) Коли модель
+ * колись зникне з ListModels, збережений вибір сам перескочить на list[0], тобто 2.1.
  */
 const FALLBACK_MODELS = [
     { id: 'models/gemini-nano-banana-2.1',      label: 'Nano Banana 2.1',     caps: CAPS_NB21 },
@@ -66,6 +68,8 @@ const FALLBACK_MODELS = [
  * Вимкнені Google, але ListModels їх ще перелічує (виміряно 2026-10-08).
  * gemini-2.5-flash-image — shutdown 2026-10-02 за сторінкою цін; стояла першою
  * в каталозі, тобто ставала моделлю за замовчуванням для нового ключа.
+ * ⚠️ Сторінка deprecations (2026-10-12) для неї пише 2027-03-15 — сторінки Google
+ * розходяться. Тримаємось ранішої дати: старша модель, заміна вже в пікері.
  */
 const RETIRED = new Set(['models/gemini-2.5-flash-image']);
 

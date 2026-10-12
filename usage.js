@@ -8,6 +8,11 @@
  *    OpenAI: https://developers.openai.com/api/docs/pricing
  *            https://developers.openai.com/api/docs/models/gpt-image-1.5
  *    Google: https://ai.google.dev/gemini-api/docs/pricing
+ *  2026-10-12 OpenAI звірено повторно: тарифи 2.5 без змін ($5 / $8 / $30).
+ *
+ *  Рядки вимкнених моделей НЕ видаляємо. Пікер їх уже не пропонує
+ *  (providers/openai.js: RETIRED), але запит, відправлений до вимкнення, усе
+ *  одно мусить порахуватись, а не лягти в журнал як «невідома модель».
  *
  *  Розрахована сума записується в журнал. Оновлення таблиці цін у майбутньому
  *  не змінить старі витрати заднім числом.
@@ -31,6 +36,7 @@ const OPENAI = {
     'gpt-image-2': {
         textIn: 5, imageIn: 8, imageOut: 30,
     },
+    // Вимикаються: 1.5 і 1-mini — 2026-12-01, gpt-image-1 — 2026-10-23.
     'gpt-image-1.5': {
         textIn: 5, imageIn: 8, imageOut: 32,
         flat: {

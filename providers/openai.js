@@ -102,6 +102,43 @@ const MODELS = [
 /** Незнайома модель: найобережніші припущення, а не найзручніші. */
 const UNKNOWN_CAPS = caps(FIXED, { qualities: Q_CLASSIC, inputFidelity: false });
 
+/**
+ * Моделі, які OpenAI вимикає. Звірено 2026-10-12 зі сторінкою
+ * developers.openai.com/api/docs/deprecations (заміна там — «sunburst або flare»).
+ *
+ * ⚠️ Фільтр ЗА ДАТОЮ, а не просте викреслення з MODELS, — і це навмисно.
+ * Реліз лишається в користувачів місяцями: викреслена зараз 1-mini зникла б на
+ * сім тижнів раніше, ніж перестала працювати, а невикреслена 1.5 після 1 грудня
+ * давала б помилку до наступного релізу. Дата ховає модель рівно тоді, коли
+ * OpenAI її вимикає, — без нового релізу.
+ *
+ * `replacement` — куди перейде збережений вибір. Не list[0]: mini — найдешевша
+ * лінійка, і її користувач має опинитися на малій Flare, а не на базовій моделі.
+ * chatgpt-image-latest у MODELS свідомо немає (лише фіксовані розміри, рухома
+ * ціль); вона тут, щоб її не додали назад до вимкнення.
+ */
+const RETIRED = new Map([
+    ['gpt-image-1',          { shutdown: '2026-10-23', replacement: 'gpt-image-2.5-sunburst' }],
+    ['gpt-image-1.5',        { shutdown: '2026-12-01', replacement: 'gpt-image-2.5-sunburst' }],
+    ['gpt-image-1-mini',     { shutdown: '2026-12-01', replacement: 'gpt-image-2.5-flare' }],
+    ['chatgpt-image-latest', { shutdown: '2026-12-01', replacement: 'gpt-image-2.5-sunburst' }],
+]);
+
+/** Дата вимкнення й заміна, або null для моделі без оголошеного вимкнення. */
+function retirement(modelId) {
+    return RETIRED.get(modelId) || null;
+}
+
+/**
+ * Модель уже вимкнена? Межа — початок дня вимкнення за UTC: година вимкнення
+ * не оголошена, і краще сховати модель на кілька годин раніше, ніж віддати
+ * помилку замість картинки.
+ */
+function isRetired(modelId, now = Date.now()) {
+    const r = RETIRED.get(modelId);
+    return Boolean(r) && now >= Date.parse(`${r.shutdown}T00:00:00Z`);
+}
+
 function authHeader(apiKey) {
     // ключ ніде не логуємо — навіть частково
     return { Authorization: `Bearer ${apiKey}` };
@@ -133,7 +170,25 @@ function authHeader(apiKey) {
  *        від ключа і є там джерелом правди.
  */
 async function models(_apiKey) {
-    return MODELS.map(m => ({ ...m }));
+    return availableModels(Date.now());
+}
+
+/**
+ * Перелік на момент `now`: вимкнені відкинуто, а ті, що ще працюють, але мають
+ * дату вимкнення, отримують підказку в пікері — інакше користувач дізнався б
+ * про вимкнення лише з того, що модель сама змінилась.
+ */
+function availableModels(now) {
+    return MODELS.filter(m => !isRetired(m.id, now)).map(m => {
+        const r = retirement(m.id);
+        if (!r) return { ...m };
+        const next = MODELS.find(x => x.id === r.replacement);
+        return {
+            ...m,
+            hintKey: 'model.retiring',
+            hintParams: { date: r.shutdown, replacement: next ? next.label : r.replacement },
+        };
+    });
 }
 
 /**
@@ -149,12 +204,18 @@ async function models(_apiKey) {
  * що «на всяк випадок» переписує все підряд, ховає справжню причину так само
  * надійно, як прибраний пункт пікера.
  */
-function explainModelError(e, model) {
+function explainModelError(e, model, now = Date.now()) {
     if (!e || e.status !== 404) return e;
     const looksLikeModel = e.code === 'model_not_found'
         || /does not exist or you do not have access/i.test(e.message || '');
     if (!looksLikeModel) return e;
-    const out = new HttpError(404, openAiI18n.t('error.modelNotOpen', { model }));
+    // Панель, відкрита ДО дня вимкнення, тримає стару модель до перезапуску:
+    // список перечитується лише на старті. Тоді «бракує доступу» — неправда.
+    const r = isRetired(model, now) ? retirement(model) : null;
+    const replacement = r && (MODELS.find(x => x.id === r.replacement) || {}).label;
+    const out = new HttpError(404, r
+        ? openAiI18n.t('error.modelRetired', { model, date: r.shutdown, replacement: replacement || r.replacement })
+        : openAiI18n.t('error.modelNotOpen', { model }));
     out.code = 'model_not_found';
     return out;
 }
@@ -525,6 +586,10 @@ module.exports = {
     supportsRefine: true,
     keyPage: 'https://platform.openai.com/api-keys',
     models,
+    availableModels,
+    retirement,
+    isRetired,
+    RETIRED,
     explainModelError,
     capsFor,
     generate,

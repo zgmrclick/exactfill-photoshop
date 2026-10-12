@@ -33,7 +33,7 @@ uses a real selection and shows the generated result returned as a precisely pla
 
 ## Install
 
-Download `ExactFill-1.5.0.zip` from [Releases](https://github.com/zgmrclick/exactfill-photoshop/releases),
+Download `ExactFill-1.7.1.zip` from [Releases](https://github.com/zgmrclick/exactfill-photoshop/releases),
 extract it completely, and close Photoshop before copying the folder.
 
 ### Windows

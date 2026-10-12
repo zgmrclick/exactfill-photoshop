@@ -185,6 +185,74 @@ test('чужі помилки explainModelError не чіпає', () => {
     }
 });
 
+/* ── Вимкнення моделей OpenAI ─────────────────────────────────────────────── */
+
+/* Звірено 2026-10-12: developers.openai.com/api/docs/deprecations.
+   ⚠️ Дати — не «колись прибрати», а момент, коли модель зникає з пікера сама,
+   без нового релізу. Тому тести ходять по календарю, а не по Date.now(). */
+const at = iso => Date.parse(`${iso}T00:00:00Z`);
+const ids = list => list.map(m => m.id);
+
+test('кожне вимкнення має дату і живу заміну', () => {
+    assert.ok(openai.RETIRED.size >= 4);
+    for (const [id, r] of openai.RETIRED) {
+        assert.match(r.shutdown, /^\d{4}-\d{2}-\d{2}$/, `${id}: дата вимкнення`);
+        assert.ok(Number.isFinite(at(r.shutdown)), `${id}: дата не розбирається`);
+        assert.ok(!openai.RETIRED.has(r.replacement), `${id}: заміна сама вимикається`);
+        assert.ok(ids(openai.availableModels(at('2030-01-01'))).includes(r.replacement),
+            `${id}: заміни ${r.replacement} немає в переліку — збережений вибір упав би на list[0]`);
+    }
+    // mini — найдешевша лінійка: її користувач має опинитися на малій моделі
+    assert.equal(openai.retirement('gpt-image-1-mini').replacement, 'gpt-image-2.5-flare');
+    assert.equal(openai.retirement('gpt-image-2.5-sunburst'), null);
+});
+
+test('вимкнена модель зникає з пікера рівно в день вимкнення', () => {
+    const before = ids(openai.availableModels(at('2026-10-22')));
+    assert.ok(before.includes('gpt-image-1'), 'до вимкнення модель працює — ховати рано');
+
+    const oct23 = ids(openai.availableModels(at('2026-10-23')));
+    assert.ok(!oct23.includes('gpt-image-1'), 'gpt-image-1 вимкнено 2026-10-23');
+    assert.ok(oct23.includes('gpt-image-1.5') && oct23.includes('gpt-image-1-mini'),
+        '1.5 і mini працюють до 2026-12-01');
+
+    const dec1 = ids(openai.availableModels(at('2026-12-01')));
+    for (const id of openai.RETIRED.keys()) assert.ok(!dec1.includes(id), `${id} після 2026-12-01`);
+    assert.deepEqual(dec1, ['gpt-image-2.5-sunburst', 'gpt-image-2.5-flare', 'gpt-image-2']);
+
+    // перша модель — вибір за замовчуванням; вона не може вимкнутись
+    for (const day of ['2026-10-12', '2026-10-23', '2026-12-01']) {
+        assert.equal(openai.availableModels(at(day))[0].id, 'gpt-image-2.5-sunburst', day);
+    }
+});
+
+test('модель, що доживає, підписана датою вимкнення', () => {
+    const mini = openai.availableModels(at('2026-11-01')).find(m => m.id === 'gpt-image-1-mini');
+    assert.equal(mini.hintKey, 'model.retiring');
+    assert.deepEqual(mini.hintParams, { date: '2026-12-01', replacement: 'GPT Image 2.5 Flare' });
+    const i18n = require('../i18n.js');
+    for (const locale of ['en', 'uk']) {
+        i18n.setLocale(locale);
+        const text = i18n.t(mini.hintKey, mini.hintParams);
+        assert.match(text, /2026-12-01/, locale);
+        assert.match(text, /GPT Image 2\.5 Flare/, locale);
+    }
+});
+
+test('404 на вимкненій моделі каже «вимкнено», а не «бракує доступу»', () => {
+    const raw = () => Object.assign(new Error(
+        'The model `gpt-image-1` does not exist or you do not have access to it.'),
+        { name: 'HttpError', status: 404, code: 'model_not_found' });
+    // панель відкрили до 23-го, генерують після — список ще старий
+    const after = openai.explainModelError(raw(), 'gpt-image-1', at('2026-10-24'));
+    assert.match(after.message, /2026-10-23/);
+    assert.match(after.message, /GPT Image 2\.5 Sunburst/);
+    assert.equal(after.code, 'model_not_found');
+    // до дня вимкнення 404 означає справжню відсутність доступу
+    const early = openai.explainModelError(raw(), 'gpt-image-1', at('2026-10-20'));
+    assert.doesNotMatch(early.message, /2026-10-23/);
+});
+
 /* ── Gemini: що з каталогу ListModels потрапляє в пікер ───────────────────── */
 
 /* Справжній знімок ListModels (лише image-моделі), 2026-10-08, у порядку API.

@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.7.1 — 2026-10-12
+
+- **OpenAI is retiring four image models, and ExactFill now steps around them by itself.** Per
+  OpenAI's deprecations page, `gpt-image-1` shuts down on 2026-10-23, and `gpt-image-1.5`,
+  `gpt-image-1-mini` and `chatgpt-image-latest` on 2026-12-01. Each model disappears from the list
+  on its shutdown date — not earlier, so GPT Image 1.5 and 1 mini keep working until December, and
+  not later, so you do not need another update to avoid errors. Until then, with one of these models
+  selected, hovering over the model list shows its shutdown date.
+- A saved choice of a retired model moves to its successor, and the panel says so in the status line:
+  GPT Image 1 mini → GPT Image 2.5 Flare (the small model), the others → GPT Image 2.5 Sunburst.
+  Note that GPT Image 2.5 is billed at a higher rate than 1 mini.
+- If the panel was opened before a shutdown date and used after it, the error now says the model
+  was retired and names the replacement, instead of claiming that your key lacks access.
+- Correction to 1.7.0: Nano Banana 2 (`gemini-3.1-flash-image`) has **no** announced shutdown date —
+  Google's deprecations page says "No shutdown date announced". The 2026-10-29 date in the 1.7.0
+  notes was wrong; nothing changes for that model.
+
 ## 1.7.0 — 2026-10-08
 
 - **Gemini results that arrive as JPEG are now inserted.** Gemini's `generateContent` returns JPEG only — the API's

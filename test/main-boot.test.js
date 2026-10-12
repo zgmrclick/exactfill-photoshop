@@ -61,15 +61,16 @@ test('рівні якості йдуть за можливостями моде�
         'шість кнопок в один ряд у 230-піксельній панелі не влазять — має бути два ряди');
 
     // ⚠️ ГОЛОВНЕ: перемикання на стару модель мусить ПРИБРАТИ рівні, яких вона
-    // не знає. Інакше запит із quality=max пішов би в gpt-image-1 і повернув 400.
+    // не знає. Інакше запит із quality=max пішов би в gpt-image-2 і повернув 400.
+    // (Модель — та, що не вимикається: тест не має старіти разом із каталогом.)
     const model = doc.getElementById('model-select');
     seg.querySelectorAll('.seg-btn').find(b => b.dataset.value === 'max').fire('click');
     assert.equal(store.get('ai_quality'), 'max');
 
-    model.value = 'gpt-image-1';
-    model.fire('change', { target: { value: 'gpt-image-1' } });
+    model.value = 'gpt-image-2';
+    model.fire('change', { target: { value: 'gpt-image-2' } });
     assert.deepEqual(levels(), ['low', 'medium', 'high', 'auto'],
-        'у gpt-image-1 розширених рівнів немає — кнопки мусять зникнути');
+        'у gpt-image-2 розширених рівнів немає — кнопки мусять зникнути');
     const active = seg.querySelectorAll('.seg-btn').filter(b => b.classList.contains('active'));
     assert.equal(active.length, 1, 'рівно один рівень активний');
     assert.equal(active[0].dataset.value, 'high',

@@ -294,9 +294,24 @@ function bindModelPicker(picker, items) {
         // нова модель відхилить чи стара не зрозуміє.
         initQuality();
         const picked = (items || []).find(it => it.value === e.target.value);
+        // Без else підказка попередньої моделі («вимикається 2026-12-01»)
+        // лишалась би на моделі, якої це не стосується.
         if (picked && picked.title) picker.setAttribute('title', picked.title);
+        else picker.removeAttribute('title');
         refreshPlanLine();
     });
+}
+
+/**
+ * Яку модель показати вибраною. Збережена — якщо вона ще є в переліку; для
+ * вимкненої — її заміна від провайдера (mini → Flare, а не найдорожча list[0]);
+ * інакше перша в переліку.
+ */
+function pickSavedModel(list, saved, provider) {
+    if (list.some(m => m.id === saved)) return saved;
+    const gone = saved && provider.retirement ? provider.retirement(saved) : null;
+    if (gone && list.some(m => m.id === gone.replacement)) return gone.replacement;
+    return list[0].id;
 }
 
 /**
@@ -337,12 +352,20 @@ async function refreshModels() {
     if (refreshSeq !== modelRefreshSeq || currentProvider().id !== p.id) return;
 
     const saved = localStorage.getItem(LS.model);
-    const pick = list.some(m => m.id === saved) ? saved : list[0].id;
+    const pick = pickSavedModel(list, saved, p);
     localStorage.setItem(LS.model, pick);
+    // Вимкнену модель замінено мовчки — а з нею могла змінитись і ціна. Кажемо.
+    const gone = saved && pick !== saved && p.retirement ? p.retirement(saved) : null;
+    if (gone) {
+        const next = list.find(m => m.id === pick);
+        setStatus(mainI18n.t('status.modelRetired', {
+            model: saved, date: gone.shutdown, replacement: next ? next.label : pick,
+        }));
+    }
     const items = list.map(m => ({
         value: m.id,
         label: m.label,
-        title: m.hintKey ? mainI18n.t(m.hintKey) : '',
+        title: m.hintKey ? mainI18n.t(m.hintKey, m.hintParams) : '',
     }));
     const picker = fillPicker('model-select', items, pick);
     bindModelPicker(picker, items);
