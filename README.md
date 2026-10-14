@@ -135,6 +135,8 @@ npm run build
 
 The release script writes `dist/ExactFill-<version>.zip`. Development measurements
 behind the placement algorithm are kept in [`verify/`](verify/README.md).
+Photoshop/UXP platform pitfalls and design decisions (in Ukrainian) are in
+[`PLATFORM.md`](PLATFORM.md).
 
 ## License
 
